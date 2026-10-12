@@ -1,0 +1,34 @@
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.log
+*.har
+.env
+.env.*
+!.env.example
+
+# Local coding assistant metadata
+.agents/
+.codegraph/
+
+# Local credentials, sessions, and exported data
+credentials.json
+session.json
+backend/profiles.json
+courses_final.json
+play_log.txt
+
+# Python build output
+backend/build/
+backend/dist/
+
+electron-app/node_modules/
+electron-app/dist/
+electron-app/release*/
+electron-app/build*/
+electron-app/null/
+electron-app/.playwright-cli/
+electron-app/.vite.pid
+electron-app/.backend.pid

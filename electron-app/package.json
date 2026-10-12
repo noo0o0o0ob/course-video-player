@@ -1,0 +1,59 @@
+{
+  "name": "course-video-player",
+  "version": "0.1.0",
+  "private": true,
+  "description": "课程视频自动播放桌面客户端",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "test": "vitest run --environment jsdom",
+    "build": "vite build",
+    "electron:dev": "cross-env NODE_ENV=development concurrently -k \"npm run dev\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "element-plus": "^2.14.2",
+    "lucide-vue-next": "^0.468.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vue/test-utils": "^2.4.11",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^29.1.1",
+    "vite": "^5.4.11",
+    "vitest": "^4.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.cqcst.course-video-player",
+    "productName": "课程视频自动播放",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/backend.exe",
+        "to": "backend/backend.exe"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
