@@ -3,10 +3,12 @@ import json
 import os
 import sys
 import threading
-from dataclasses import asdict, dataclass, field
+import tempfile
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from core.secret_storage import PREFIX, protect_secret, recover_secret
 
 
 def _get_profiles_path() -> Path:
@@ -140,18 +142,52 @@ class ProfileManager:
         if PROFILES_FILE.exists():
             try:
                 data = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+                if not isinstance(data, list):
+                    raise ValueError("配置文件格式不正确")
+                loaded = {}
+                migrate = False
                 for item in data:
+                    item = dict(item)
+                    encrypted_headers = item.pop("encrypted_extra_headers", "")
+                    if encrypted_headers:
+                        item["extra_headers"] = json.loads(recover_secret(encrypted_headers))
+                    elif item.get("extra_headers"):
+                        migrate = True
+                    cookie = item.get("cookie", "")
+                    if cookie and not cookie.startswith(PREFIX):
+                        migrate = True
+                    item["cookie"] = recover_secret(cookie)
                     profile = BrowserProfile(**item)
-                    self._profiles[profile.profile_id] = profile
+                    loaded[profile.profile_id] = profile
+                if migrate:
+                    self._save(loaded)
+                self._profiles = loaded
             except Exception:
-                pass
+                raise RuntimeError("本地浏览器配置无法读取，请检查配置文件和 Windows 用户") from None
 
-    def _save(self) -> None:
-        data = [p.to_dict() for p in self._profiles.values() if not p.is_preset]
-        PROFILES_FILE.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    def _save(self, profiles: dict[str, BrowserProfile] | None = None) -> None:
+        data = []
+        for profile in (self._profiles if profiles is None else profiles).values():
+            if profile.is_preset:
+                continue
+            item = profile.to_dict()
+            item["cookie"] = protect_secret(profile.cookie)
+            item["extra_headers"] = {}
+            if profile.extra_headers:
+                item["encrypted_extra_headers"] = protect_secret(json.dumps(profile.extra_headers, ensure_ascii=False))
+            data.append(item)
+        PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".profiles-", suffix=".tmp", dir=PROFILES_FILE.parent, delete=False) as file:
+                temporary = Path(file.name)
+                json.dump(data, file, ensure_ascii=False, indent=2)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, PROFILES_FILE)
+        finally:
+            if temporary and temporary.exists():
+                temporary.unlink()
 
     def list_all(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -204,8 +240,9 @@ class ProfileManager:
             extra_headers=extra_headers or {},
         )
         with self._lock:
-            self._profiles[profile_id] = profile
-            self._save()
+            updated = {**self._profiles, profile_id: profile}
+            self._save(updated)
+            self._profiles = updated
         return profile
 
     def update(self, profile_id: str, **kwargs: Any) -> BrowserProfile | None:
@@ -213,17 +250,19 @@ class ProfileManager:
             profile = self._profiles.get(profile_id)
             if not profile or profile.is_preset:
                 return None
-            for key, value in kwargs.items():
-                if hasattr(profile, key):
-                    setattr(profile, key, value)
-            self._save()
-            return profile
+            changes = {key: value for key, value in kwargs.items() if key in BrowserProfile.__dataclass_fields__ and key not in {"profile_id", "is_preset"}}
+            updated_profile = replace(profile, **changes)
+            updated = {**self._profiles, profile_id: updated_profile}
+            self._save(updated)
+            self._profiles = updated
+            return updated_profile
 
     def delete(self, profile_id: str) -> bool:
         with self._lock:
             if profile_id in self._profiles and not self._profiles[profile_id].is_preset:
-                del self._profiles[profile_id]
-                self._save()
+                updated = {key: value for key, value in self._profiles.items() if key != profile_id}
+                self._save(updated)
+                self._profiles = updated
                 return True
             return False
 

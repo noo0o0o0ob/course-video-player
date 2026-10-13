@@ -4,6 +4,7 @@ from typing import Any
 
 from core.events import manager
 from core.player import AutoPlayer
+from core.errors import NotLoggedInError, TaskRunningError
 
 
 class SessionManager:
@@ -27,12 +28,15 @@ class SessionManager:
     def require_player(self) -> AutoPlayer:
         player = self.get_player()
         if player is None or not player.token:
-            raise RuntimeError("尚未登录")
+            raise NotLoggedInError("尚未登录")
         return player
 
     def login(self, username: str, password: str) -> dict[str, Any]:
-        player = self.get_or_create_player()
-        return player.login(username, password)
+        with self._lock:
+            player = self.get_or_create_player()
+            if player.is_playing:
+                raise TaskRunningError("播放任务运行中，停止任务后才能切换账号")
+            return player.login(username, password)
 
     def session_info(self) -> dict[str, Any]:
         player = self.get_player()

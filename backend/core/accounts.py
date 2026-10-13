@@ -7,6 +7,7 @@ from uuid import uuid4
 from core.events import manager
 from core.player import AutoPlayer
 from core.profiles import profile_manager
+from core.errors import AccountNotFoundError, NotLoggedInError, safe_error_message
 
 
 @dataclass
@@ -28,11 +29,15 @@ class AccountManager:
         self._accounts: dict[str, AccountContext] = {}
 
     def _emit_account_event(self, account_id: str, event_type: str, payload: dict[str, Any]) -> None:
-        account = self._accounts.get(account_id)
+        with self._lock:
+            account = self._accounts.get(account_id)
+            if account and event_type == "error":
+                account.last_error = payload.get("message") or "任务发生错误"
+            elif account and event_type == "session" and payload.get("logged_in") is True:
+                account.last_error = None
         manager.emit(
             event_type,
             account_id=account_id,
-            account_username=account.username if account else None,
             **payload,
         )
 
@@ -94,8 +99,7 @@ class AccountManager:
         manager.emit(
             "account",
             account_id=account_id,
-            account_username=username,
-            message=f"账号 {username} 已加入账号池",
+            message="账号已加入账号池",
         )
         return {"status": True, "account": self._public_account(account), "user": result.get("user")}
 
@@ -107,7 +111,7 @@ class AccountManager:
         with self._lock:
             account = self._accounts.get(account_id)
             if not account:
-                raise RuntimeError("账号不存在")
+                raise AccountNotFoundError("账号不存在")
             return account
 
     def remove(self, account_id: str) -> dict[str, Any]:
@@ -118,9 +122,9 @@ class AccountManager:
         account.player.stop()
         return {"status": True, "message": "账号已移除"}
 
-    def get_courses(self, account_id: str) -> list[dict[str, Any]]:
+    def get_courses(self, account_id: str, kind: str = "all") -> list[dict[str, Any]]:
         account = self.get_account(account_id)
-        courses = account.player.get_courses()
+        courses = account.player.get_courses(kind)
         account.courses_cache = courses
         return courses
 
@@ -139,9 +143,11 @@ class AccountManager:
         for chapter in chapters:
             try:
                 state = account.player.get_study_state(str(chapter["node_id"]))
+            except NotLoggedInError:
+                raise
             except Exception as exc:
-                state = 0
-                chapter["state_error"] = str(exc)
+                state = None
+                chapter["state_error"] = safe_error_message(exc)
             chapter["study_state"] = state
             if state == 2:
                 completed += 1
@@ -162,18 +168,19 @@ class AccountManager:
         }
 
     def start(self, account_id: str, course_id: str) -> dict[str, Any]:
-        account = self.get_account(account_id)
         with self._lock:
+            account = self.get_account(account_id)
+            account.player.require_login()
             if account.thread and account.thread.is_alive():
                 return {"status": False, "message": "该账号已有播放任务正在运行"}
             if account.player.is_playing:
                 return {"status": False, "message": "该账号已有播放任务正在运行"}
 
-            account.player.stop_flag = False
+            account.player.prepare_playback(course_id)
             account.last_error = None
             account.thread = threading.Thread(
-                target=account.player.play_all,
-                args=(course_id,),
+                target=self._run_playback,
+                args=(account, course_id),
                 daemon=True,
                 name=f"course-playback-{account_id}",
             )
@@ -181,17 +188,31 @@ class AccountManager:
 
         return {
             "status": True,
-            "message": f"账号 {account.username} 的播放任务已启动",
+            "message": "账号的播放任务已启动",
             "account_id": account_id,
             "course_id": course_id,
         }
 
+    def _run_playback(self, account: AccountContext, course_id: str) -> None:
+        try:
+            account.player.play_all(course_id)
+        except Exception as exc:
+            account.player.is_playing = False
+            message = safe_error_message(exc)
+            account.player.update_status(is_playing=False, is_stopping=False, message=message)
+            self._emit_account_event(account.account_id, "error", {"message": message})
+
     def start_all(self, course_id: str) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         with self._lock:
-            account_ids = list(self._accounts)
-        for account_id in account_ids:
-            account = self.get_account(account_id)
+            accounts = list(self._accounts.values())
+        for account in accounts:
+            account_id = account.account_id
+            with self._lock:
+                still_registered = self._accounts.get(account_id) is account
+            if not still_registered:
+                results.append({"account_id": account_id, "username": account.username, "status": False, "message": "账号已移除"})
+                continue
             if not account.player.token:
                 results.append(
                     {
@@ -202,7 +223,10 @@ class AccountManager:
                     }
                 )
                 continue
-            result = self.start(account_id, course_id)
+            try:
+                result = self.start(account_id, course_id)
+            except Exception as exc:
+                result = {"status": False, "message": safe_error_message(exc)}
             results.append(
                 {
                     "account_id": account_id,
@@ -221,15 +245,19 @@ class AccountManager:
     def stop(self, account_id: str) -> dict[str, Any]:
         account = self.get_account(account_id)
         account.player.stop()
-        return {"status": True, "message": f"账号 {account.username} 已发送停止指令"}
+        return {"status": True, "message": "账号已发送停止指令"}
 
     def stop_all(self) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         with self._lock:
-            account_ids = list(self._accounts)
-        for account_id in account_ids:
-            account = self.get_account(account_id)
-            result = self.stop(account_id)
+            accounts = list(self._accounts.values())
+        for account in accounts:
+            account_id = account.account_id
+            try:
+                account.player.stop()
+                result = {"status": True, "message": "账号已发送停止指令"}
+            except Exception as exc:
+                result = {"status": False, "message": safe_error_message(exc)}
             results.append(
                 {
                     "account_id": account_id,

@@ -1,38 +1,28 @@
 <template>
-  <el-container class="app-shell">
-    <el-header class="top-bar">
+  <div class="app-shell">
+    <header class="top-bar">
       <div class="brand-block">
         <el-icon class="brand-mark" :size="22">
           <School />
         </el-icon>
         <div class="brand-copy">
-          <p class="eyebrow">授权测试工作台</p>
-          <h1>课程视频播放控制台</h1>
+          <h1>课程工作台</h1>
+          <p>账号、课程、播放，一页掌握</p>
         </div>
       </div>
 
       <div class="status-cluster" aria-label="当前任务状态">
-        <div class="status-metric">
-          <span>账号</span>
-          <strong>{{ accounts.length }}</strong>
-        </div>
-        <div class="status-metric">
-          <span>课程</span>
-          <strong>{{ courses.length }}</strong>
-        </div>
-        <div class="status-metric">
-          <span>节点</span>
-          <strong>{{ chapters.length }}</strong>
-        </div>
-        <el-tag :type="isPlaying ? 'success' : 'info'" effect="dark" round>
-          <el-icon><VideoPlay /></el-icon>
-          {{ isPlaying ? '运行中' : '待命' }}
-        </el-tag>
+        <span><strong>{{ accounts.length }}</strong> 个账号</span>
+        <span><strong>{{ courses.length }}</strong> 门课程</span>
+        <span><strong>{{ chapters.length }}</strong> 个章节</span>
+        <span class="live-status" :class="{ running: isPlaying }">
+          <i aria-hidden="true" />{{ isPlaying ? '播放中' : '等待开始' }}
+        </span>
       </div>
-    </el-header>
+    </header>
 
-    <el-container class="workbench">
-      <el-aside class="left-rail" width="360px">
+    <main class="workbench" aria-label="课程工作台">
+      <section class="account-workspace" aria-label="账号管理与登录">
         <AccountPool
           :accounts="accounts"
           :selected-account-id="selectedAccountId"
@@ -48,48 +38,28 @@
           @save-credentials="saveCredentials"
           @clear-credentials="clearCredentials"
         />
-      </el-aside>
+      </section>
 
-      <el-main class="main-surface">
-        <el-card class="flow-card" shadow="never">
-          <div class="flow-summary">
-            <div>
-              <p class="eyebrow">下一步</p>
-              <h2>{{ canStartPlayback ? '可以开始播放' : '继续准备任务' }}</h2>
-              <p>{{ nextActionText }}</p>
-            </div>
-            <el-button
-              type="primary"
-              :disabled="!canStartPlayback"
-              :icon="VideoPlay"
-              @click="handleStart"
-            >
-              当前账号开始
-            </el-button>
-          </div>
-
-          <el-steps :active="activeStep" finish-status="success" align-center>
-            <el-step
-              v-for="step in flowSteps"
-              :key="step.key"
-              :title="step.title"
-              :description="step.detail"
-              :status="step.status"
-            />
-          </el-steps>
-        </el-card>
-
+      <section class="learning-workspace" aria-label="课程与播放">
         <CoursePanel
           :courses="courses"
           :chapters="chapters"
           :selected-course-id="selectedCourseId"
           :loading="courseLoading"
+          :account-ready="session.logged_in"
           @refresh="loadCourses"
           @select-course="selectCourse"
         />
 
-        <el-row :gutter="16" class="task-grid">
-          <el-col :xs="24" :md="12">
+        <section class="task-surface" aria-label="当前播放任务">
+          <div class="task-context">
+            <div>
+              <span class="context-label">当前任务</span>
+              <strong>{{ selectedCourse?.name || '还未选择课程' }}</strong>
+              <p>{{ selectedAccount ? (selectedAccount.label || selectedAccount.user?.name || selectedAccount.username) : '还未选择账号' }}</p>
+            </div>
+            <el-icon :size="22"><VideoPlay /></el-icon>
+          </div>
             <PlaybackControls
               :disabled="!selectedAccountId || !selectedCourseId || !session.logged_in"
               :is-playing="isPlaying"
@@ -98,44 +68,27 @@
               @stop="handleStop"
               @stop-all="handleStopAll"
             />
-          </el-col>
-          <el-col :xs="24" :md="12">
             <PlaybackProgress
               :status="playStatus"
               :total-progress="totalProgress"
               :current-video-progress="currentVideoProgress"
             />
-          </el-col>
-        </el-row>
-      </el-main>
-    </el-container>
+          <p class="next-action" role="status">{{ nextActionText }}</p>
+        </section>
+      </section>
 
-    <el-button
-      class="floating-log-button"
-      type="primary"
-      :icon="Document"
-      round
-      @click="logOpen = true"
-    >
-      日志
-      <el-badge :value="logs.length" :max="99" type="info" />
-    </el-button>
-
-    <el-drawer
-      v-model="logOpen"
-      title="实时日志"
-      direction="rtl"
-      size="min(640px, 92vw)"
-      class="log-drawer"
-    >
-      <LogPanel :logs="logs" :active="logOpen" @clear="logs = []" />
-    </el-drawer>
-  </el-container>
+      <LogPanel :logs="logs" @clear="logs = []" />
+    </main>
+    <footer class="workspace-footer">
+      <span>登录账号 → 读取课程 → 开始播放</span>
+      <span>本地课程管理</span>
+    </footer>
+  </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Document, School, VideoPlay } from '@element-plus/icons-vue'
+import { School, VideoPlay } from '@element-plus/icons-vue'
 import AccountPool from './components/AccountPool.vue'
 import LoginPanel from './components/LoginPanel.vue'
 import CoursePanel from './components/CoursePanel.vue'
@@ -143,7 +96,6 @@ import PlaybackControls from './components/PlaybackControls.vue'
 import PlaybackProgress from './components/PlaybackProgress.vue'
 import LogPanel from './components/LogPanel.vue'
 import { getEmptyCourseSelection } from './utils/courseSelection.mjs'
-import { displayAccountName } from './utils/logIdentity.mjs'
 import {
   createEventSocket,
   getAccountChapters,
@@ -171,7 +123,6 @@ const playStatus = ref('等待开始')
 const currentVideoProgress = ref(0)
 const totalProgress = ref(0)
 const logs = ref([])
-const logOpen = ref(false)
 
 let socket = null
 let reconnectTimer = null
@@ -191,23 +142,6 @@ const session = computed(() => ({
   user: selectedAccount.value?.user || null
 }))
 
-const canStartPlayback = computed(() =>
-  Boolean(selectedAccountId.value && selectedCourseId.value && session.value.logged_in && !isPlaying.value)
-)
-
-const activeStep = computed(() => {
-  if (isPlaying.value || canStartPlayback.value) {
-    return 3
-  }
-  if (selectedCourseId.value) {
-    return 2
-  }
-  if (selectedAccountId.value && session.value.logged_in) {
-    return 1
-  }
-  return 0
-})
-
 const nextActionText = computed(() => {
   if (!selectedAccountId.value || !session.value.logged_in) {
     return '登录或选择一个在线账号'
@@ -220,27 +154,6 @@ const nextActionText = computed(() => {
   }
   return '检查课程和账号后启动当前任务'
 })
-
-const flowSteps = computed(() => [
-  {
-    key: 'account',
-    title: '账号',
-    detail: selectedAccount.value?.user?.name || selectedAccount.value?.username || '未选择',
-    status: selectedAccountId.value && session.value.logged_in ? 'success' : 'process'
-  },
-  {
-    key: 'course',
-    title: '课程',
-    detail: selectedCourse.value?.name || (courses.value.length ? '请选择课程' : '等待课程列表'),
-    status: selectedCourseId.value ? 'success' : selectedAccountId.value ? 'process' : 'wait'
-  },
-  {
-    key: 'play',
-    title: '播放',
-    detail: isPlaying.value ? '运行中' : canStartPlayback.value ? '可启动' : '未就绪',
-    status: isPlaying.value ? 'process' : canStartPlayback.value ? 'process' : 'wait'
-  }
-])
 
 function addLog(message, level = 'info') {
   const lastLog = logs.value[logs.value.length - 1]
@@ -270,8 +183,7 @@ function syncSelectedStatus() {
 }
 
 function applyEvent(event) {
-  const displayName = displayAccountName(event, accounts.value)
-  const prefix = displayName ? `[${displayName}] ` : ''
+  const prefix = event.account_id ? `[账号 ${event.account_id.slice(0, 6)}] ` : ''
   if (event.message) {
     addLog(`${prefix}${event.message}`, event.level || event.type || 'info')
   }
@@ -300,9 +212,15 @@ function applyEvent(event) {
       }
       accounts.value[index] = {
         ...current,
+        logged_in: typeof event.logged_in === 'boolean' ? event.logged_in : event.reason === 'session_expired' ? false : current.logged_in,
+        user: event.reason === 'session_expired' ? null : current.user,
+        last_error: event.logged_in === true ? null : event.type === 'error' ? event.message : current.last_error,
         is_playing:
           typeof event.is_playing === 'boolean' ? event.is_playing : current.is_playing,
         status: nextStatus
+      }
+      if (event.type === 'session') {
+        void refreshAccounts()
       }
     }
     if (event.account_id !== selectedAccountId.value) {
@@ -364,7 +282,7 @@ async function syncCourseData(courseId) {
   }
 }
 
-function connectEvents() {
+async function connectEvents() {
   window.clearTimeout(reconnectTimer)
   socketGeneration += 1
   const generation = socketGeneration
@@ -372,12 +290,20 @@ function connectEvents() {
     socket.onclose = null
     socket.close()
   }
-  socket = createEventSocket(applyEvent, () => {
+  try {
+    const nextSocket = await createEventSocket(applyEvent, () => {
+      if (generation !== socketGeneration) return
+      reconnectTimer = window.setTimeout(connectEvents, 2500)
+    })
     if (generation !== socketGeneration) {
-      return
+      nextSocket.onclose = null
+      nextSocket.close()
+    } else {
+      socket = nextSocket
     }
-    reconnectTimer = window.setTimeout(connectEvents, 2500)
-  })
+  } catch {
+    if (generation === socketGeneration) reconnectTimer = window.setTimeout(connectEvents, 2500)
+  }
 }
 
 async function refreshAccounts() {
@@ -408,7 +334,7 @@ async function handleLogin(payload) {
     selectedAccountId.value = result.account?.account_id || selectedAccountId.value
     resetCourseSelection()
     syncSelectedStatus()
-    addLog(`账号 ${payload.username} 登录成功`)
+    addLog('账号登录成功')
   } catch (error) {
     addLog(`登录失败: ${error.message}`, 'error')
   } finally {

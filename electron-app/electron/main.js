@@ -1,41 +1,33 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, safeStorage } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const http = require('http')
 const { spawn } = require('child_process')
+const { randomBytes } = require('node:crypto')
+const { pathToFileURL } = require('node:url')
+const { createBackendSpec, findAvailablePort } = require('./backend-launcher.cjs')
 
 let mainWindow
 let backendProcess
 
-const backendPort = 8765
+let backendPort = 8765
+const backendToken = randomBytes(32).toString('hex')
 
 function getCredentialPath() {
   return path.join(app.getPath('userData'), 'credentials.bin')
 }
 
-function startBackend() {
+async function startBackend() {
   if (backendProcess) {
     return
   }
 
   const rootDir = path.resolve(__dirname, '..', '..')
-  let command
-  let args = []
-  let cwd
-
-  if (app.isPackaged) {
-    // 打包后运行 backend.exe（位于 resources/backend/）
-    command = path.join(process.resourcesPath, 'backend', 'backend.exe')
-    cwd = path.dirname(command)
-  } else {
-    // 开发模式：直接运行 python main.py
-    command = 'python'
-    args = [path.join(rootDir, 'backend', 'main.py')]
-    cwd = path.join(rootDir, 'backend')
-  }
-
-  backendProcess = spawn(command, args, {
-    cwd: cwd,
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+  backendPort = await findAvailablePort(8765)
+  const spec = createBackendSpec({ rootDir, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, port: backendPort, token: backendToken })
+  backendProcess = spawn(spec.command, spec.args, {
+    cwd: spec.cwd,
+    env: spec.env,
     windowsHide: true,
     detached: false
   })
@@ -50,6 +42,44 @@ function startBackend() {
       console.log(`Backend exited with code ${code}`)
     }
     backendProcess = null
+  })
+
+  try {
+    await waitForBackendReady()
+  } catch {
+    stopBackend()
+    throw new Error('本地后端未能及时启动，请重试')
+  }
+}
+
+function waitForBackendReady(timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      error ? reject(error) : resolve()
+    }
+    const poll = () => {
+      if (settled) return
+      if (!backendProcess) {
+        finish(new Error('后端进程已退出'))
+        return
+      }
+      if (Date.now() >= deadline) {
+        finish(new Error('后端启动超时'))
+        return
+      }
+      const request = http.get(`http://127.0.0.1:${backendPort}/api/health`, (response) => {
+        response.resume()
+        if (response.statusCode === 200) finish()
+        else setTimeout(poll, 250)
+      })
+      request.setTimeout(1000, () => request.destroy())
+      request.on('error', () => setTimeout(poll, 250))
+    }
+    poll()
   })
 }
 
@@ -69,18 +99,25 @@ function stopBackend() {
 }
 
 function createWindow() {
+  Menu.setApplicationMenu(null)
   mainWindow = new BrowserWindow({
-    width: 1080,
-    height: 760,
+    width: 1280,
+    height: 860,
     minWidth: 900,
     minHeight: 640,
-    backgroundColor: '#f6f7fb',
+    backgroundColor: '#f4f7f6',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
   })
+  mainWindow.setMenuBarVisibility(false)
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedPage(url)) event.preventDefault()
+  })
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://127.0.0.1:5173')
@@ -89,9 +126,28 @@ function createWindow() {
   }
 }
 
-ipcMain.handle('app:get-backend-url', () => `http://127.0.0.1:${backendPort}`)
+function isTrustedPage(url) {
+  try {
+    if (process.env.NODE_ENV === 'development') return new URL(url).origin === 'http://127.0.0.1:5173'
+    return url.split('#')[0] === pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).href
+  } catch { return false }
+}
 
-ipcMain.handle('credentials:load', () => {
+function requireTrustedRenderer(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !isTrustedPage(event.senderFrame?.url || '')) throw new Error('请求来源不被允许')
+}
+
+ipcMain.handle('app:get-backend-url', event => {
+  requireTrustedRenderer(event)
+  return `http://127.0.0.1:${backendPort}`
+})
+ipcMain.handle('app:get-backend-token', event => {
+  requireTrustedRenderer(event)
+  return backendToken
+})
+
+ipcMain.handle('credentials:load', event => {
+  requireTrustedRenderer(event)
   const filePath = getCredentialPath()
   if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(filePath)) {
     return null
@@ -105,7 +161,8 @@ ipcMain.handle('credentials:load', () => {
   }
 })
 
-ipcMain.handle('credentials:save', (_event, payload) => {
+ipcMain.handle('credentials:save', (event, payload) => {
+  requireTrustedRenderer(event)
   if (!safeStorage.isEncryptionAvailable()) {
     return { status: false, message: '当前系统不可用加密存储' }
   }
@@ -115,7 +172,8 @@ ipcMain.handle('credentials:save', (_event, payload) => {
   return { status: true }
 })
 
-ipcMain.handle('credentials:clear', () => {
+ipcMain.handle('credentials:clear', event => {
+  requireTrustedRenderer(event)
   const filePath = getCredentialPath()
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath)
@@ -123,8 +181,8 @@ ipcMain.handle('credentials:clear', () => {
   return { status: true }
 })
 
-app.whenReady().then(() => {
-  startBackend()
+app.whenReady().then(async () => {
+  await startBackend()
   createWindow()
 })
 

@@ -13,14 +13,14 @@ router = APIRouter()
 @router.websocket("/ws/events")
 async def websocket_events(websocket: WebSocket):
     manager.set_loop(asyncio.get_running_loop())
-    await manager.connect(websocket)
-    await websocket.send_json(
-        {"type": "log", "level": "info", "message": "实时日志已连接", "timestamp": time.time()}
-    )
     try:
+        await manager.connect(websocket, subprotocol="course-events" if "course-events" in websocket.scope.get("subprotocols", []) else None)
+        await websocket.send_json({"type": "log", "level": "info", "message": "实时日志已连接", "timestamp": time.time()})
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        pass
     except Exception:
+        pass
+    finally:
         manager.disconnect(websocket)

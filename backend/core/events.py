@@ -14,8 +14,8 @@ class WebSocketManager:
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    async def connect(self, websocket: WebSocket) -> None:
-        await websocket.accept()
+    async def connect(self, websocket: WebSocket, subprotocol: str | None = None) -> None:
+        await websocket.accept(subprotocol=subprotocol)
         self._connections.add(websocket)
 
     def disconnect(self, websocket: WebSocket) -> None:
@@ -35,7 +35,11 @@ class WebSocketManager:
     def emit(self, event_type: str, **payload: Any) -> None:
         event = {"type": event_type, **payload, "timestamp": time.time()}
         if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(self.broadcast(event), self._loop)
+            coroutine = self.broadcast(event)
+            try:
+                asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+            except RuntimeError:
+                coroutine.close()
 
 
 manager = WebSocketManager()

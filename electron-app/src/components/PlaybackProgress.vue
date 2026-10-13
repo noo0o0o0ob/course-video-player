@@ -1,13 +1,11 @@
 <template>
-  <el-card class="panel-card progress-panel" shadow="never">
-    <template #header>
+  <section class="progress-panel" aria-label="播放进度">
       <div class="panel-header">
         <div>
           <h2>播放进度</h2>
           <p>{{ status }}</p>
         </div>
       </div>
-    </template>
 
     <div class="progress-stack" aria-label="播放进度">
       <div v-for="row in rows" :key="row.key" class="progress-row">
@@ -17,13 +15,13 @@
         </div>
         <el-progress
           :percentage="row.value"
-          :stroke-width="10"
+          :stroke-width="6"
           :show-text="false"
           :status="row.key === 'total' ? 'success' : undefined"
         />
       </div>
     </div>
-  </el-card>
+  </section>
 </template>
 
 <script setup>

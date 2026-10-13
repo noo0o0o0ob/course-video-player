@@ -3,43 +3,44 @@
     <template #header>
       <div class="panel-header">
         <div>
-          <h2>课程与节点</h2>
+          <h2>我的课程 <span class="section-count">{{ courses.length }}</span></h2>
           <p>{{ chapterSummary }}</p>
         </div>
-        <el-button :icon="Refresh" :loading="loading" circle title="刷新课程" @click="$emit('refresh')" />
+        <el-button :icon="Refresh" :loading="loading" :disabled="!accountReady" @click="$emit('refresh')">读取课程</el-button>
       </div>
     </template>
 
-    <div class="course-toolbar">
-      <el-select
-        :model-value="selectedCourseId"
-        placeholder="请选择课程"
-        filterable
-        class="full-control"
-        @change="$emit('select-course', $event)"
-      >
-        <el-option
-          v-for="course in courses"
-          :key="course.course_id"
-          :label="course.name"
-          :value="course.course_id"
-        />
-      </el-select>
-      <el-tag type="info" round>{{ courses.length }} 门</el-tag>
+    <div v-if="courses.length" class="course-picker">
+      <el-input v-model="search" :prefix-icon="Search" placeholder="搜索课程" aria-label="搜索课程" clearable />
+      <div class="course-options" role="group" aria-label="课程选择">
+        <button v-for="course in filteredCourses" :key="course.course_id" type="button"
+          class="course-option" :class="{ selected: course.course_id === selectedCourseId }"
+          :aria-pressed="course.course_id === selectedCourseId" :title="course.name"
+          @click="$emit('select-course', course.course_id)">
+          <el-icon><Reading /></el-icon><span>{{ course.name }}</span>
+          <el-icon v-if="course.course_id === selectedCourseId"><Check /></el-icon>
+        </button>
+        <p v-if="!filteredCourses.length" class="search-empty">没有找到匹配课程，试试其他关键词</p>
+      </div>
     </div>
 
-    <el-skeleton v-if="loading && !chapters.length" :rows="5" animated />
-    <el-empty v-else-if="!chapters.length" description="暂无章节数据" />
-    <el-scrollbar v-else class="chapter-scroll">
+    <div class="chapter-heading"><span>课程章节</span><span>{{ completedCount }} / {{ chapters.length }} 已完成</span></div>
+    <el-skeleton v-if="loading && !chapters.length" :rows="3" animated />
+    <div v-else-if="!chapters.length" class="empty-state course-empty">
+      <el-icon :size="28"><Reading /></el-icon>
+      <strong>{{ accountReady ? courses.length ? '选择一门课程，查看章节' : '准备好你的课程' : '登录后，课程就从这里开始' }}</strong>
+      <p>{{ accountReady ? courses.length ? '上方直接点击课程即可' : '点击「读取课程」获取课程列表' : '添加或选择在线账号，再读取课程' }}</p>
+    </div>
+    <div v-else class="chapter-scroll" aria-label="课程章节列表">
       <div
         v-for="(chapter, index) in chapters"
         :key="chapter.node_id"
         class="chapter-row"
         :data-state="stateKey(chapter.study_state)"
       >
-        <el-tag class="chapter-index" round effect="plain">{{ index + 1 }}</el-tag>
+        <span class="chapter-index">{{ String(index + 1).padStart(2, '0') }}</span>
         <div class="chapter-main">
-          <strong>{{ chapter.name }}</strong>
+          <strong :title="chapter.name">{{ chapter.name }}</strong>
           <small>
             <el-tag :type="stateType(chapter.study_state)" size="small" round>
               {{ stateText(chapter.study_state) }}
@@ -49,22 +50,29 @@
         </div>
         <span class="chapter-duration">{{ formatDuration(chapter.duration) }}</span>
       </div>
-    </el-scrollbar>
+    </div>
   </el-card>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { computed, ref, watch } from 'vue'
+import { Check, Reading, Refresh, Search } from '@element-plus/icons-vue'
 
 const props = defineProps({
   courses: { type: Array, default: () => [] },
   chapters: { type: Array, default: () => [] },
   selectedCourseId: { type: String, default: '' },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  accountReady: { type: Boolean, default: false }
 })
 
 defineEmits(['refresh', 'select-course'])
+
+const search = ref('')
+const filteredCourses = computed(() => props.courses.filter((course) =>
+  String(course.name || '').toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())
+))
+watch(() => props.courses, () => { search.value = '' })
 
 const completedCount = computed(() =>
   props.chapters.filter((chapter) => chapter.study_state === 2).length
@@ -72,12 +80,12 @@ const completedCount = computed(() =>
 
 const chapterSummary = computed(() => {
   if (!props.courses.length) {
-    return '点击刷新读取课程'
+    return props.accountReady ? '点击「读取课程」获取列表' : '先添加或选择在线账号'
   }
   if (!props.chapters.length) {
-    return '选择课程后读取章节'
+    return '直接点击课程，查看章节'
   }
-  return `已完成 ${completedCount.value}/${props.chapters.length} 个节点`
+  return `已完成 ${completedCount.value}/${props.chapters.length} 个章节`
 })
 
 function stateKey(state) {

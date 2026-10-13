@@ -31,12 +31,12 @@ class ProfileUpdateRequest(BaseModel):
 
 
 @router.get("/profiles")
-async def list_profiles():
+def list_profiles():
     return {"status": True, "profiles": profile_manager.list_all()}
 
 
 @router.get("/profiles/{profile_id}")
-async def get_profile(profile_id: str):
+def get_profile(profile_id: str):
     profile = profile_manager.get(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="配置不存在")
@@ -44,7 +44,7 @@ async def get_profile(profile_id: str):
 
 
 @router.post("/profiles")
-async def create_profile(request: ProfileCreateRequest):
+def create_profile(request: ProfileCreateRequest):
     profile = profile_manager.create(
         name=request.name,
         description=request.description,
@@ -59,7 +59,7 @@ async def create_profile(request: ProfileCreateRequest):
 
 
 @router.put("/profiles/{profile_id}")
-async def update_profile(profile_id: str, request: ProfileUpdateRequest):
+def update_profile(profile_id: str, request: ProfileUpdateRequest):
     updates = request.model_dump(exclude_none=True)
     profile = profile_manager.update(profile_id, **updates)
     if not profile:
@@ -68,7 +68,7 @@ async def update_profile(profile_id: str, request: ProfileUpdateRequest):
 
 
 @router.delete("/profiles/{profile_id}")
-async def delete_profile(profile_id: str):
+def delete_profile(profile_id: str):
     if not profile_manager.delete(profile_id):
         raise HTTPException(status_code=404, detail="配置不存在或为预设配置，无法删除")
     return {"status": True, "message": "配置已删除"}

@@ -11,14 +11,14 @@ class PlayTaskManager:
         self._thread: threading.Thread | None = None
 
     def start(self, course_id: str) -> dict[str, Any]:
-        with self._lock:
+        with self._lock, session_manager._lock:
             player = session_manager.require_player()
             if self._thread and self._thread.is_alive():
                 return {"status": False, "message": "播放任务正在运行"}
             if player.is_playing:
                 return {"status": False, "message": "播放任务正在运行"}
 
-            player.stop_flag = False
+            player.prepare_playback(course_id)
             self._thread = threading.Thread(
                 target=player.play_all,
                 args=(course_id,),

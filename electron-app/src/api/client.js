@@ -1,18 +1,44 @@
 let apiBase = 'http://127.0.0.1:8765'
+let backendToken = ''
+let initialization = null
+let tokenRequest = null
 
 function getBrowserBackendUrl() {
   const { protocol, hostname } = window.location
   const host = hostname || '127.0.0.1'
-  return `${protocol}//${host}:8765`
+  const configuredPort = Number(new URLSearchParams(window.location.search).get('backendPort'))
+  const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535 ? configuredPort : 8765
+  return `${protocol === 'https:' ? 'https:' : 'http:'}//${host}:${port}`
 }
 
 export async function initApiBase() {
-  if (window.desktopAPI?.getBackendUrl) {
-    apiBase = await window.desktopAPI.getBackendUrl()
-  } else {
-    apiBase = getBrowserBackendUrl()
+  if (!initialization) {
+    initialization = (async () => {
+      apiBase = window.desktopAPI?.getBackendUrl ? await window.desktopAPI.getBackendUrl() : getBrowserBackendUrl()
+      return apiBase
+    })()
   }
-  return apiBase
+  return initialization
+}
+
+async function ensureBackendToken() {
+  await initApiBase()
+  if (backendToken) return backendToken
+  if (!tokenRequest) {
+    tokenRequest = (async () => {
+      if (window.desktopAPI?.getBackendToken) {
+        backendToken = await window.desktopAPI.getBackendToken()
+      } else {
+        const response = await fetch(`${apiBase}/api/client-session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        const data = await response.json()
+        if (!response.ok) throw new Error('无法建立本地客户端会话')
+        backendToken = data.token
+      }
+      if (typeof backendToken !== 'string' || !backendToken) throw new Error('本地客户端会话未就绪')
+      return backendToken
+    })().finally(() => { tokenRequest = null })
+  }
+  return tokenRequest
 }
 
 function formatErrorMessage(data, status) {
@@ -26,21 +52,27 @@ function formatErrorMessage(data, status) {
   return `请求失败：${status}`
 }
 
-async function request(path, options = {}) {
+async function request(path, options = {}, refreshed = false) {
   let response
   try {
+    const token = await ensureBackendToken()
     response = await fetch(`${apiBase}${path}`, {
+      ...options,
       headers: {
         'Content-Type': 'application/json',
-        ...(options.headers || {})
-      },
-      ...options
+        ...(options.headers || {}),
+        Authorization: `Bearer ${token}`
+      }
     })
   } catch {
-    throw new Error(`无法连接后端服务，请确认 ${apiBase} 已启动并允许局域网访问`)
+    throw new Error(`无法连接本机后端，请确认 ${apiBase} 已启动`)
   }
 
   const data = await response.json().catch(() => ({}))
+  if (response.status === 401 && data.code === 'client_auth_failed' && !refreshed) {
+    backendToken = ''
+    return request(path, options, true)
+  }
   if (!response.ok) {
     throw new Error(formatErrorMessage(data, response.status))
   }
@@ -147,9 +179,10 @@ export function getPlayStatus() {
   return request('/api/play/status')
 }
 
-export function createEventSocket(onEvent, onClose) {
+export async function createEventSocket(onEvent, onClose) {
+  const token = await ensureBackendToken()
   const url = apiBase.replace(/^http/, 'ws')
-  const ws = new WebSocket(`${url}/api/ws/events`)
+  const ws = new WebSocket(`${url}/api/ws/events`, ['course-events', token])
 
   ws.onmessage = (event) => {
     try {
@@ -160,6 +193,7 @@ export function createEventSocket(onEvent, onClose) {
   }
 
   ws.onclose = () => {
+    backendToken = ''
     onClose?.()
   }
 
