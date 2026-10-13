@@ -13,7 +13,7 @@
     <div v-if="!accounts.length" class="empty-state account-empty">
       <el-icon :size="26"><User /></el-icon>
       <strong>先添加一个账号</strong>
-      <p>登录后，账号会显示在这里</p>
+      <p>在下方填写平台地址、账号和密码并登录。账号加入后即可读取课程，选择章节并启动任务。</p>
     </div>
     <div v-else class="account-scroll" role="group" aria-label="可用账号">
       <div

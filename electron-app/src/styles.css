@@ -1,3 +1,59 @@
+.watch-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.window-actions .about-button { width: auto; padding: 0 12px; font-size: 12px; }
+.support-toolbar { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; padding: 8px 12px; border-top: 1px solid var(--app-border); }
+.support-toolbar .el-button { margin: 0; }
+.support-dialog { --el-dialog-bg-color: var(--app-panel); --el-text-color-primary: var(--app-ink); --el-text-color-regular: var(--app-ink); }
+.support-dialog p { margin: 10px 0; line-height: 1.6; overflow-wrap: anywhere; }
+.support-intro, .summary-account small { color: var(--app-muted); font-size: 13px; line-height: 1.6; }
+.support-scroll { max-height: 55vh; overflow: auto; }
+.confirmation-scope { max-height: 30vh; overflow: auto; padding-left: 24px; line-height: 1.8; }
+.summary-account { padding: 14px 0; border-bottom: 1px solid var(--app-border); }
+.summary-account .panel-header { align-items: flex-start; }
+.summary-account .panel-header strong { overflow-wrap: anywhere; min-width: 0; }
+.summary-account .el-tag { flex-shrink: 0; }
+.summary-account small { display: block; margin-top: 8px; }
+.summary-chapters { list-style: none; padding: 0; }
+.summary-chapters li { display: grid; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--app-border); font-size: 13px; overflow-wrap: anywhere; }
+.summary-chapters span { color: var(--app-muted); }
+.issue-notice { padding: 12px; border: 1px solid var(--app-border); border-radius: 6px; }
+.troubleshooting-list dt { margin-top: 14px; font-weight: 600; }
+.troubleshooting-list dd { margin: 5px 0 0; color: var(--app-muted); line-height: 1.6; }
+.release-notes { padding-left: 20px; margin: 14px 0; line-height: 1.8; }
+.project-link { font-size: 12px; color: var(--app-muted); }
+.onboarding-steps { display: grid; gap: 14px; max-width: 36ch; margin-top: 10px; padding-left: 22px; text-align: left; font-size: 12px; line-height: 1.5; }
+.onboarding-steps strong { display: block; font-size: 13px; }
+.onboarding-steps span { display: block; margin-top: 3px; }
+.onboarding-steps .done::marker { color: var(--app-primary); }
+.course-panel .course-empty { overflow: auto; justify-content: flex-start; }
+
+.watch-settings-dialog .el-dialog__body { padding-top: 8px; }
+.settings-intro { color: var(--app-muted); line-height: 1.6; margin-bottom: 16px; }
+.settings-scroll { max-height: calc(90vh - 190px); overflow-y: auto; padding-right: 8px; }
+.settings-group + .settings-group { margin-top: 22px; }
+.settings-group h3 { font-size: 14px; margin: 0; padding: 8px 0; color: var(--app-primary); }
+.setting-row { display: grid; grid-template-columns: 176px 152px minmax(0, 1fr); align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--app-border); }
+.setting-label { font-weight: 500; color: var(--app-ink); }
+.setting-fixed-value { color: var(--app-muted); font-variant-numeric: tabular-nums; }
+.setting-control { display: flex; align-items: center; gap: 8px; }
+.setting-control .el-input-number { width: 120px; }
+.setting-control .el-input__inner { text-align: left; font-variant-numeric: tabular-nums; }
+.setting-unit, .setting-details { color: var(--app-muted); }
+.setting-details p { color: var(--app-ink); line-height: 1.5; margin: 0 0 4px; }
+.setting-details span { font-size: 12px; }
+.settings-footer { display: flex; justify-content: space-between; gap: 12px; }
+@media (max-width: 700px) {
+  .setting-row { grid-template-columns: minmax(0, 1fr) 152px; gap: 10px; }
+  .setting-details { grid-column: 1 / -1; }
+}
+
 :root {
   color-scheme: light;
   --app-bg: oklch(0.965 0.005 194);
@@ -64,6 +120,30 @@ button { -webkit-tap-highlight-color: transparent; }
   color: var(--app-ink);
   background: var(--app-bg);
 }
+
+.app-titlebar {
+  display: flex;
+  flex: 0 0 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 14px;
+  background: var(--app-bg);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.titlebar-brand, .window-actions { display: flex; height: 100%; align-items: center; }
+.titlebar-brand { gap: 9px; color: var(--app-ink); font-size: 12px; }
+.titlebar-brand strong { font-size: 12px; font-weight: 650; }
+.titlebar-mark { display: block; width: 26px; height: 26px; object-fit: contain; }
+.titlebar-divider { width: 1px; height: 15px; margin: 0 2px; background: var(--app-border); }
+.titlebar-subtitle { color: var(--app-muted); }
+.window-actions { -webkit-app-region: no-drag; }
+.window-actions button { display: grid; width: 46px; height: 100%; place-items: center; border: 0; border-radius: 0; color: var(--app-ink); background: transparent; cursor: pointer; }
+.window-actions button:hover { background: var(--app-panel-muted); }
+.window-actions .window-close:hover { color: white; background: #d23e3e; }
+.minimize-glyph { width: 10px; height: 1px; background: currentColor; }
+.window-close span { margin-top: -2px; font-size: 22px; font-weight: 300; line-height: 1; }
 
 .app-shell:has(.theme-input:checked) {
   color-scheme: dark;
@@ -195,6 +275,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .login-panel .el-card__header { padding-bottom: 8px; }
 .login-panel .el-card__body { padding-top: 2px; }
+.login-panel .el-card__body { overflow-y: auto; }
 .login-panel .panel-header > div { min-width: 0; }
 .login-panel .panel-header p { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .login-fields { display: grid; min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 5px; }
@@ -234,7 +315,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .chapter-duration { color: var(--app-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chapter-main .el-tag { height: 20px; flex-shrink: 0; font-size: 11px; }
 
-.activity-column { display: grid; grid-template-rows: minmax(260px, 1fr) minmax(170px, 0.9fr); }
+.activity-column { display: grid; grid-template-rows: minmax(260px, max-content) auto minmax(120px, 1fr); }
 .task-surface { display: flex; min-height: 0; flex-direction: column; overflow: auto; padding: 13px 14px 11px; border-bottom: 1px solid var(--app-border); background: transparent; }
 .task-context { display: flex; min-width: 0; flex-shrink: 0; align-items: center; gap: 10px; margin-bottom: 12px; }
 .task-icon { display: grid; width: 38px; height: 38px; flex-shrink: 0; place-items: center; border-radius: 8px; color: var(--app-primary); background: var(--app-primary-soft); }

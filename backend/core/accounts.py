@@ -167,7 +167,7 @@ class AccountManager:
             },
         }
 
-    def start(self, account_id: str, course_id: str) -> dict[str, Any]:
+    def start(self, account_id: str, course_id: str, full_auto_mode: bool = False, captcha_max_retries: int = 3, captcha_retry_interval: int = 1, **settings) -> dict[str, Any]:
         with self._lock:
             account = self.get_account(account_id)
             account.player.require_login()
@@ -176,6 +176,7 @@ class AccountManager:
             if account.player.is_playing:
                 return {"status": False, "message": "该账号已有播放任务正在运行"}
 
+            account.player.configure_playback(full_auto_mode=full_auto_mode, captcha_max_retries=captcha_max_retries, captcha_retry_interval=captcha_retry_interval, **settings)
             account.player.prepare_playback(course_id)
             account.last_error = None
             account.thread = threading.Thread(
@@ -202,7 +203,7 @@ class AccountManager:
             account.player.update_status(is_playing=False, is_stopping=False, message=message)
             self._emit_account_event(account.account_id, "error", {"message": message})
 
-    def start_all(self, course_id: str) -> dict[str, Any]:
+    def start_all(self, course_id: str, full_auto_mode: bool = False, captcha_max_retries: int = 3, captcha_retry_interval: int = 1, **settings) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         with self._lock:
             accounts = list(self._accounts.values())
@@ -224,7 +225,7 @@ class AccountManager:
                 )
                 continue
             try:
-                result = self.start(account_id, course_id)
+                result = self.start(account_id, course_id, full_auto_mode, captcha_max_retries, captcha_retry_interval, **settings)
             except Exception as exc:
                 result = {"status": False, "message": safe_error_message(exc)}
             results.append(

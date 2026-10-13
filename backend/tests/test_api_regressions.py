@@ -15,6 +15,7 @@ import requests
 from main import app
 import api.accounts as accounts_api
 import core.player as player_module
+from core.playback_settings import PlaybackSettings
 from core.accounts import AccountContext, AccountManager
 
 
@@ -54,6 +55,47 @@ async def websocket_handshake(origin, authenticated):
 
 
 class ApiRegressionTests(unittest.TestCase):
+    def test_all_failed_batch_keeps_account_results_in_error_response(self):
+        result = {"status": False, "message": "已启动 0/1 个账号的播放任务", "results": [{"account_id": "synthetic", "status": False, "message": "账号未登录"}]}
+        with patch.object(accounts_api.account_manager, "start_all", return_value=result):
+            status, data, _ = asyncio.run(request("/api/accounts/play/start-all", "POST", {"course_id": "1"}))
+        self.assertEqual(status, 409)
+        self.assertEqual(data["results"], result["results"])
+
+    def test_watch_options_validation_and_forwarding(self):
+        for path in ("/api/accounts/synthetic/play/start", "/api/accounts/play/start-all"):
+            for retries in (0, 11, 1.5):
+                status, _, _ = asyncio.run(request(path, "POST", {"course_id": "1", "captcha_max_retries": retries}))
+                self.assertEqual(status, 422)
+            for interval in (0, 61, 1.5):
+                status, _, _ = asyncio.run(request(path, "POST", {"course_id": "1", "captcha_retry_interval": interval}))
+                self.assertEqual(status, 422)
+        with patch.object(accounts_api.account_manager, "start", return_value={"status": True}) as start:
+            status, _, _ = asyncio.run(request("/api/accounts/synthetic/play/start", "POST", {"course_id": "1", "full_auto_mode": True, "captcha_max_retries": 10, "captcha_retry_interval": 5}))
+            self.assertEqual(status, 200)
+            extras = accounts_api.AccountPlayStartRequest(course_id="1").extra_settings()
+            start.assert_called_once_with("synthetic", "1", True, 10, 5, **extras)
+        with patch.object(accounts_api.account_manager, "start_all", return_value={"status": True}) as start_all:
+            status, _, _ = asyncio.run(request("/api/accounts/play/start-all", "POST", {"course_id": "1"}))
+            self.assertEqual(status, 200)
+            start_all.assert_called_once_with("1", False, 3, 1, **extras)
+
+    def test_all_watch_setting_bounds_and_custom_batch_forwarding(self):
+        custom = {"course_id": "1"}
+        for name, field in PlaybackSettings.model_fields.items():
+            if name == "full_auto_mode":
+                continue
+            lower = next(item.ge for item in field.metadata if hasattr(item, "ge"))
+            upper = next(item.le for item in field.metadata if hasattr(item, "le"))
+            custom[name] = upper
+            for value in (lower - 1, upper + 1, 1.5):
+                status, _, _ = asyncio.run(request("/api/accounts/play/start-all", "POST", {"course_id": "1", name: value}))
+                self.assertEqual(status, 422, (name, value))
+        with patch.object(accounts_api.account_manager, "start_all", return_value={"status": True}) as start_all:
+            status, _, _ = asyncio.run(request("/api/accounts/play/start-all", "POST", custom))
+            self.assertEqual(status, 200)
+            start_all.assert_called_once_with("1", False, 10, 60, **accounts_api.AccountPlayStartRequest(**custom).extra_settings())
+
     def test_private_api_requires_client_token(self):
         status, _, _ = asyncio.run(request("/api/profiles", authenticated=False))
         self.assertEqual(status, 401)

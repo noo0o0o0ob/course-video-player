@@ -2,7 +2,7 @@
   "name": "course-video-player",
   "version": "0.1.0",
   "private": true,
-  "description": "课程视频自动播放桌面客户端",
+  "description": "课程管理与观看进度客户端",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -32,12 +32,14 @@
   "build": {
     "appId": "com.cqcst.course-video-player",
     "productName": "课程视频自动播放",
+    "artifactName": "${productName}-安装程序-${version}.${ext}",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "public/**/*",
       "package.json"
     ],
     "extraResources": [
@@ -48,12 +50,22 @@
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "executableName": "课程视频自动播放",
+      "icon": "public/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "课程视频自动播放",
+      "uninstallDisplayName": "课程视频自动播放",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerLanguages": ["zh_CN"],
+      "displayLanguageSelector": false
     }
   }
 }

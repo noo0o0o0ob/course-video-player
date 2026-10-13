@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from api.errors import raise_api_error
 from pydantic import BaseModel, Field
 
 from core.accounts import account_manager
+from core.playback_settings import PlaybackSettings
 from typing import Literal
 
 
@@ -18,8 +20,11 @@ class AccountLoginRequest(BaseModel):
     platform_url: str | None = None
 
 
-class AccountPlayStartRequest(BaseModel):
+class AccountPlayStartRequest(PlaybackSettings):
     course_id: str = Field(..., min_length=1)
+
+    def extra_settings(self):
+        return self.model_dump(exclude={"course_id", "full_auto_mode", "captcha_max_retries", "captcha_retry_interval"})
 
 
 def _raise_backend_error(exc: Exception):
@@ -83,7 +88,7 @@ def account_course_progress(account_id: str, course_id: str):
 @router.post("/accounts/{account_id}/play/start")
 def start_account_playback(account_id: str, request: AccountPlayStartRequest):
     try:
-        result = account_manager.start(account_id, request.course_id)
+        result = account_manager.start(account_id, request.course_id, request.full_auto_mode, request.captcha_max_retries, request.captcha_retry_interval, **request.extra_settings())
     except RuntimeError as exc:
         raise_api_error(exc)
     if not result.get("status"):
@@ -93,9 +98,9 @@ def start_account_playback(account_id: str, request: AccountPlayStartRequest):
 
 @router.post("/accounts/play/start-all")
 def start_all_accounts_playback(request: AccountPlayStartRequest):
-    result = account_manager.start_all(request.course_id)
+    result = account_manager.start_all(request.course_id, request.full_auto_mode, request.captcha_max_retries, request.captcha_retry_interval, **request.extra_settings())
     if not result.get("status"):
-        raise HTTPException(status_code=409, detail=result.get("message", "没有可启动的账号"))
+        return JSONResponse(status_code=409, content=result)
     return result
 
 

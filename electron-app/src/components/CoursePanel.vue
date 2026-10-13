@@ -30,6 +30,12 @@
       <el-icon :size="28"><Reading /></el-icon>
       <strong>{{ accountReady ? courses.length ? '选择一门课程，查看章节' : '准备好你的课程' : '登录后，课程就从这里开始' }}</strong>
       <p>{{ accountReady ? courses.length ? '上方直接点击课程即可' : '点击「读取课程」获取课程列表' : '添加或选择在线账号，再读取课程' }}</p>
+      <ol class="onboarding-steps" aria-label="首次使用步骤">
+        <li :class="{ done: accountReady }"><strong>配置账号</strong><span>填写平台地址和账号密码，登录后选择在线账号。</span></li>
+        <li :class="{ done: Boolean(selectedCourseId) }"><strong>读取课程</strong><span>点击「读取课程」，选择一门课程并检查章节进度。</span></li>
+        <li><strong>启动任务</strong><span>确认观看设置，点击「开始播放」；结束后查看任务总结。</span></li>
+      </ol>
+      <p v-if="selectedCourseId">所选课程没有可播放章节，试试重新读取课程或选择其他课程。</p>
     </div>
     <div v-else class="chapter-scroll" aria-label="课程章节列表">
       <div

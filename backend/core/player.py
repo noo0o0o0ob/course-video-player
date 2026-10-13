@@ -11,6 +11,7 @@ from typing import Any
 
 import requests
 from core.errors import NotLoggedInError, SessionExpiredError, safe_error_message
+from core.playback_settings import PlaybackSettings
 
 try:
     import ddddocr
@@ -26,6 +27,10 @@ DEFAULT_INTERVAL_SECONDS = 30
 
 
 EventCallback = Callable[[str, dict[str, Any]], None]
+
+
+class CaptchaRetriesExhaustedError(Exception):
+    pass
 
 
 class CoursePageParser(HTMLParser):
@@ -96,6 +101,7 @@ class AutoPlayer:
         self.user_info: dict[str, Any] | None = None
         self.duration_cache: dict[str, int] = {}
         self.is_playing = False
+        self.configure_playback()
         self.stop_flag = False
         self.status: dict[str, Any] = {
             "is_playing": False,
@@ -132,6 +138,10 @@ class AutoPlayer:
     @stop_flag.setter
     def stop_flag(self, value: bool) -> None:
         self._stop_event.set() if value else self._stop_event.clear()
+
+    def configure_playback(self, **settings) -> None:
+        for key, value in PlaybackSettings(**settings).model_dump().items():
+            setattr(self, key, value)
 
     def _get(self, *args, **kwargs):
         with self._network_lock:
@@ -303,7 +313,7 @@ class AutoPlayer:
                     "Referer": f"{self.base_url}/user/study_record?courseId={course_id}",
                     "X-Requested-With": "XMLHttpRequest",
                 },
-                timeout=20,
+                timeout=self.network_timeout,
             )
             self._check_response(response)
             parsed_text = self.response_text_for_parse(response.text)
@@ -361,12 +371,12 @@ class AutoPlayer:
                     key, value = item.strip().split("=", 1)
                     self.session.cookies.set(key.strip(), value.strip(), domain=self._cookie_domain(), path="/", secure=self.base_url.startswith("https:"))
             self.log("正在登录")
-            self._get(f"{self.base_url}/user/login", timeout=15).raise_for_status()
+            self._get(f"{self.base_url}/user/login", timeout=self.login_page_timeout).raise_for_status()
             response = self._post(
                 f"{self.base_url}/api/login",
                 data={"username": username, "password": password, "remember": "on"},
                 headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": self.profile.get("referer") or f"{self.base_url}/user/login", "X-Requested-With": self.profile.get("x_requested_with") or "XMLHttpRequest"},
-                timeout=20,
+                timeout=self.network_timeout,
             )
             response.raise_for_status()
             data = json.loads(response.text.lstrip("\ufeff"))
@@ -393,7 +403,8 @@ class AutoPlayer:
             self.log(f"登录失败: {message}", level="error")
             return {"status": False, "message": message}
 
-    def relogin(self, max_retries: int = 3) -> bool:
+    def relogin(self, max_retries: int | None = None) -> bool:
+        max_retries = max_retries if max_retries is not None else self.relogin_max_retries
         if not self.username or not self.password:
             self.log("无法自动重新登录：缺少账号或密码", level="error")
             return False
@@ -415,7 +426,8 @@ class AutoPlayer:
 
             message = self.response_message(result)
             self.log(f"自动重新登录失败: {message}", level="error")
-            self.interruptible_sleep(2)
+            if attempt < max_retries:
+                self.interruptible_sleep(self.relogin_retry_interval)
 
         return False
 
@@ -434,7 +446,7 @@ class AutoPlayer:
         self.log("正在获取课程列表")
         def read_page(url):
             for attempt in range(3):
-                response = self._get(url, headers={"Referer": f"{self.base_url}/user"}, timeout=20)
+                response = self._get(url, headers={"Referer": f"{self.base_url}/user"}, timeout=self.network_timeout)
                 self._check_response(response)
                 if response.text.lstrip().lstrip("\ufeff").startswith("{"):
                     self.log("课程页面返回异常，正在重试", level="warning")
@@ -479,7 +491,7 @@ class AutoPlayer:
         response = self._get(
             f"{self.base_url}/user/course/chapter?courseId={course_id}",
             headers={"Referer": f"{self.base_url}/user/course?courseId={course_id}"},
-            timeout=20,
+            timeout=self.network_timeout,
         )
         self._check_response(response)
         html = response.text
@@ -559,7 +571,7 @@ class AutoPlayer:
 
     def get_video_duration(self, node_id: str) -> int:
         self.require_login()
-        response = self._get(f"{self.base_url}/user/node?nodeId={node_id}", timeout=20)
+        response = self._get(f"{self.base_url}/user/node?nodeId={node_id}", timeout=self.network_timeout)
         self._check_response(response)
         match = re.search(
             r"""<input\b(?=[^>]*\bid=["']video-duration["'])[^>]*\bvalue=["']([^"']*)["']""",
@@ -599,7 +611,7 @@ class AutoPlayer:
 
     def get_study_state(self, node_id: str) -> int:
         self.require_login()
-        response = self._get(f"{self.base_url}/user/node?nodeId={node_id}", timeout=20)
+        response = self._get(f"{self.base_url}/user/node?nodeId={node_id}", timeout=self.network_timeout)
         self._check_response(response)
         state = self.parse_study_state_from_html(response.text)
         if state is not None:
@@ -609,7 +621,7 @@ class AutoPlayer:
     def get_user_progress(self, course_id: str) -> dict[str, Any]:
         self.require_login()
         response = self._get(
-            f"{self.base_url}/user/course?courseId={course_id}", timeout=20
+            f"{self.base_url}/user/course?courseId={course_id}", timeout=self.network_timeout
         )
         self._check_response(response)
         html = response.text
@@ -621,7 +633,7 @@ class AutoPlayer:
         }
 
     def get_captcha(self) -> bytes:
-        response = self._get(f"{self.base_url}/service/code?r={time.time()}", timeout=20)
+        response = self._get(f"{self.base_url}/service/code?r={time.time()}", timeout=self.network_timeout)
         response.raise_for_status()
         return response.content
 
@@ -654,7 +666,7 @@ class AutoPlayer:
                 "Referer": self.profile.get("referer") or f"{self.base_url}/user/node?nodeId={node_id}",
                 "X-Requested-With": x_requested_with,
             },
-            timeout=20,
+            timeout=self.network_timeout,
         )
         if self._response_is_session_expired(response):
             self._invalidate_for_relogin()
@@ -677,7 +689,7 @@ class AutoPlayer:
             response = self._post(
                 f"{self.base_url}/user/online",
                 headers={"X-Requested-With": x_requested_with},
-                timeout=10,
+                timeout=self.heartbeat_timeout,
             )
             if self._response_is_session_expired(response):
                 self._invalidate_for_relogin()
@@ -687,32 +699,41 @@ class AutoPlayer:
             return False
 
     def handle_captcha(
-        self, node_id: str, study_id: int | str = 0, current_time: int = 0, max_retries: int = 3
+        self, node_id: str, study_id: int | str = 0, current_time: int = 0, max_retries: int | None = None
     ) -> dict[str, Any]:
-        for attempt in range(max_retries):
+        retry_limit = max_retries if max_retries is not None else self.captcha_max_retries
+        retry_limit = max(1, min(10, retry_limit))
+        attempt = 0
+        while self.full_auto_mode or attempt < retry_limit:
             if self.stop_flag:
                 return {"status": False, "msg": "已停止"}
+            if attempt:
+                self.interruptible_sleep(self.captcha_retry_interval)
+                if self.stop_flag:
+                    return {"status": False, "msg": "已停止"}
+            attempt += 1
+            attempt_text = str(attempt) if self.full_auto_mode else f"{attempt}/{retry_limit}"
             self.log(
-                f"需要验证码，正在尝试识别 {attempt + 1}/{max_retries}",
+                f"需要验证码，正在尝试识别 {attempt_text}",
                 level="warning",
                 node_id=node_id,
             )
             image_bytes = self.get_captcha()
             code = self.solve_captcha(image_bytes)
             if not code:
-                time.sleep(2)
                 continue
+            if self.stop_flag:
+                return {"status": False, "msg": "已停止"}
             response = self.report_time(node_id, current_time, study_id, code=code)
-            if response.get("status"):
+            if response.get("status") in (True, 1) and not response.get("need_code"):
                 self.log("验证码提交成功", node_id=node_id)
                 return response
             message = self.response_message(response)
-            if "验证码" in message or "code" in message.lower():
+            if response.get("need_code") or "验证码" in message or "code" in message.lower():
                 self.log(f"验证码被拒绝: {message}", level="warning", node_id=node_id)
-                time.sleep(1)
                 continue
             return response
-        return {"status": False, "msg": "验证码重试次数已用完"}
+        return {"status": False, "msg": "验证码识别错误，请手动点击重试", "reason": "captcha_retries_exhausted"}
 
     def interruptible_sleep(self, seconds: int) -> None:
         for _ in range(seconds):
@@ -725,6 +746,7 @@ class AutoPlayer:
         for index, video in enumerate(videos):
             if self.stop_flag:
                 return index
+            self.update_status(current_node_id=str(video["node_id"]), current_node_name=str(video["name"]), message="正在检查章节进度")
             state = self.get_study_state(str(video["node_id"]))
             video["state"] = state
             if state == 2:
@@ -779,11 +801,15 @@ class AutoPlayer:
                 accepted = False
 
             if not accepted:
+                if self.stop_flag:
+                    return False
+                if result.get("reason") == "captcha_retries_exhausted":
+                    raise CaptchaRetriesExhaustedError(result["msg"])
                 message = self.response_message(result)
                 if self.is_session_expired_message(message):
-                    if relogin_attempts < 3:
+                    if relogin_attempts < self.relogin_max_rounds:
                         relogin_attempts += 1
-                        if self.relogin(max_retries=3):
+                        if self.relogin(max_retries=self.relogin_max_retries):
                             continue
                     self.handle_session_expired("自动重新登录失败，播放已暂停", node_id=node_id)
                 if "已完成" in message and self.get_study_state(node_id) == 2:
@@ -791,10 +817,10 @@ class AutoPlayer:
                     return True
                 errors += 1
                 self.log(f"学习时长提交未确认: {message}", level="warning", node_id=node_id)
-                if errors >= 6:
+                if errors >= self.report_max_failures:
                     self.emit("error", message="节点提交多次失败，未标记完成", node_id=node_id)
                     return False
-                self.interruptible_sleep(5)
+                self.interruptible_sleep(self.report_retry_interval)
                 continue
 
             confirmed_seconds = next_seconds
@@ -817,6 +843,11 @@ class AutoPlayer:
 
     def play_all(self, course_id: str) -> None:
         completed = failed = 0
+        started_at = time.time()
+        results = []
+        videos = []
+        failure_reason = None
+        active_result = None
         try:
             self.require_login()
             if self.stop_flag:
@@ -825,6 +856,7 @@ class AutoPlayer:
             self.is_playing = True
             self.update_status(is_playing=True, is_stopping=False, course_id=course_id, current_node_id=None, current_node_name=None, current_index=0, current_video_progress=0, completed_nodes=0, failed_nodes=0, total_progress=0, message="正在启动")
             videos = self.get_chapters(course_id)
+            results = [{"node_id": str(video["node_id"]), "name": str(video["name"]), "outcome": "not_run", "message": "尚未执行"} for video in videos]
             self.update_status(total_nodes=len(videos))
             if self.stop_flag:
                 self.update_status(message="已停止")
@@ -837,6 +869,8 @@ class AutoPlayer:
                 self.update_status(message="已停止")
                 return
             completed = start_index
+            for item in results[:start_index]:
+                item.update(outcome="success", message="平台已确认完成，已跳过")
             self.update_status(completed_nodes=completed, total_progress=int(completed * 100 / len(videos)))
             if start_index == len(videos):
                 self.update_status(current_video_progress=100, total_progress=100, message="已完成")
@@ -845,16 +879,23 @@ class AutoPlayer:
                 if self.stop_flag:
                     break
                 video = videos[index]
+                active_result = results[index]
+                active_result.update(outcome="failed", message="平台尚未确认完成，可重试")
                 duration = self.get_cached_video_duration(str(video["node_id"])) or int(video.get("duration") or 0)
                 if duration <= 0:
                     failed += 1
+                    active_result["message"] = "未读取到有效视频时长，请刷新课程后重试"
                 elif self.play_video(str(video["node_id"]), str(video["name"]), duration, index, len(videos)):
                     completed += 1
+                    active_result.update(outcome="success", message="平台已确认完成")
                 elif not self.stop_flag:
                     failed += 1
+                else:
+                    active_result.update(outcome="stopped", message="用户已停止，章节未完成")
+                active_result = None
                 self.update_status(completed_nodes=completed, failed_nodes=failed, total_progress=int(completed * 100 / len(videos)))
                 if index < len(videos) - 1:
-                    self.interruptible_sleep(3)
+                    self.interruptible_sleep(self.chapter_interval)
             if self.stop_flag:
                 self.update_status(message="已停止")
             elif failed:
@@ -862,17 +903,43 @@ class AutoPlayer:
                 self.emit("error", message=f"有 {failed} 个节点未完成")
             elif completed == len(videos):
                 self.update_status(current_video_progress=100, total_progress=100, message="已完成")
+        except CaptchaRetriesExhaustedError as exc:
+            failure_reason = "captcha_retries_exhausted"
+            self.update_status(message=str(exc))
+            self.emit("error", message=str(exc), reason="captcha_retries_exhausted", course_id=course_id, node_id=self.status.get("current_node_id"))
         except SessionExpiredError:
+            failure_reason = "session_expired"
             self.update_status(message="登录已失效，请重新登录")
             self.emit("error", message="登录已失效，请重新登录", reason="session_expired")
         except Exception as exc:
+            failure_reason = "timeout" if isinstance(exc, requests.Timeout) else "connection" if isinstance(exc, requests.RequestException) else "task_failed"
             message = safe_error_message(exc)
             self.log(message, level="error")
             self.emit("error", message=message)
             self.update_status(message=message)
         finally:
+            for video, item in zip(videos, results):
+                if video.get("state") == 2 and item["outcome"] == "not_run":
+                    item.update(outcome="success", message="平台已确认完成，已跳过")
+            if active_result:
+                active_result.update(outcome="stopped" if self.stop_flag else "failed", message=self.status.get("message", "任务未完成"))
+            elif failure_reason:
+                for item in results:
+                    if item["node_id"] == self.status.get("current_node_id") and item["outcome"] == "not_run":
+                        item.update(outcome="failed", message=self.status.get("message", "章节检查失败"))
+            outcome = "stopped" if self.stop_flag else "failed" if failure_reason or not results or any(item["outcome"] != "success" for item in results) else "success"
+            summary = {
+                "run_id": str(time.time_ns()), "course_id": course_id,
+                "started_at": started_at, "finished_at": time.time(),
+                "outcome": outcome, "reason": failure_reason,
+                "message": self.status.get("message", "任务已结束"),
+                "chapters": results,
+                "completed": sum(item["outcome"] == "success" for item in results),
+                "failed": sum(item["outcome"] == "failed" for item in results),
+            }
             self.is_playing = False
-            self.update_status(is_playing=False, is_stopping=False)
+            self.update_status(is_playing=False, is_stopping=False, completed_nodes=summary["completed"], failed_nodes=summary["failed"], task_summary=summary)
+            self.emit("task_summary", summary=summary)
 
     def stop(self) -> None:
         self.stop_flag = True

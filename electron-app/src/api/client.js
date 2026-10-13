@@ -74,7 +74,9 @@ async function request(path, options = {}, refreshed = false) {
     return request(path, options, true)
   }
   if (!response.ok) {
-    throw new Error(formatErrorMessage(data, response.status))
+    const error = new Error(formatErrorMessage(data, response.status))
+    if (Array.isArray(data.results)) error.results = data.results
+    throw error
   }
   return data
 }
@@ -149,17 +151,17 @@ export function startPlay(courseId) {
   })
 }
 
-export function startAccountPlay(accountId, courseId) {
+export function startAccountPlay(accountId, courseId, options = {}) {
   return request(`/api/accounts/${encodeURIComponent(accountId)}/play/start`, {
     method: 'POST',
-    body: JSON.stringify({ course_id: courseId })
+    body: JSON.stringify({ ...options, course_id: courseId })
   })
 }
 
-export function startAllAccountPlay(courseId) {
+export function startAllAccountPlay(courseId, options = {}) {
   return request('/api/accounts/play/start-all', {
     method: 'POST',
-    body: JSON.stringify({ course_id: courseId })
+    body: JSON.stringify({ ...options, course_id: courseId })
   })
 }
 

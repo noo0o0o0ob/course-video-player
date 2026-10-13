@@ -65,4 +65,10 @@ describe('本地后端客户端访问', () => {
     await expect(client.loginAccount('synthetic-user', 'synthetic-password')).rejects.toThrow('账号或密码错误')
     expect(logins).toBe(1)
   })
+  test('批量启动 HTTP 409 保留逐账号失败结果', async () => {
+    const results = [{ account_id: 'synthetic', status: false, message: '账号未登录' }]
+    vi.stubGlobal('fetch', async url => url.endsWith('/api/client-session') ? jsonResponse({ token: 'synthetic-client-token' }) : jsonResponse({ message: '没有账号启动成功', results }, 409))
+    const client = await import('./client.js')
+    await expect(client.startAllAccountPlay('synthetic-course')).rejects.toMatchObject({ message: '没有账号启动成功', results })
+  })
 })
