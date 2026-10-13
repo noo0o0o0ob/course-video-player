@@ -1,28 +1,7 @@
 <template>
   <div class="app-shell">
-    <header class="top-bar">
-      <div class="brand-block">
-        <el-icon class="brand-mark" :size="22">
-          <School />
-        </el-icon>
-        <div class="brand-copy">
-          <h1>课程工作台</h1>
-          <p>账号、课程、播放，一页掌握</p>
-        </div>
-      </div>
-
-      <div class="status-cluster" aria-label="当前任务状态">
-        <span><strong>{{ accounts.length }}</strong> 个账号</span>
-        <span><strong>{{ courses.length }}</strong> 门课程</span>
-        <span><strong>{{ chapters.length }}</strong> 个章节</span>
-        <span class="live-status" :class="{ running: isPlaying }">
-          <i aria-hidden="true" />{{ isPlaying ? '播放中' : '等待开始' }}
-        </span>
-      </div>
-    </header>
-
-    <main class="workbench" aria-label="课程工作台">
-      <section class="account-workspace" aria-label="账号管理与登录">
+    <main class="workbench" aria-label="课程工作区">
+      <section class="work-column account-column" aria-label="账号与登录">
         <AccountPool
           :accounts="accounts"
           :selected-account-id="selectedAccountId"
@@ -40,7 +19,7 @@
         />
       </section>
 
-      <section class="learning-workspace" aria-label="课程与播放">
+      <section class="work-column course-column" aria-label="课程与章节">
         <CoursePanel
           :courses="courses"
           :chapters="chapters"
@@ -50,38 +29,72 @@
           @refresh="loadCourses"
           @select-course="selectCourse"
         />
-
-        <section class="task-surface" aria-label="当前播放任务">
-          <div class="task-context">
-            <div>
-              <span class="context-label">当前任务</span>
-              <strong>{{ selectedCourse?.name || '还未选择课程' }}</strong>
-              <p>{{ selectedAccount ? (selectedAccount.label || selectedAccount.user?.name || selectedAccount.username) : '还未选择账号' }}</p>
-            </div>
-            <el-icon :size="22"><VideoPlay /></el-icon>
-          </div>
-            <PlaybackControls
-              :disabled="!selectedAccountId || !selectedCourseId || !session.logged_in"
-              :is-playing="isPlaying"
-              @start="handleStart"
-              @start-all="handleStartAll"
-              @stop="handleStop"
-              @stop-all="handleStopAll"
-            />
-            <PlaybackProgress
-              :status="playStatus"
-              :total-progress="totalProgress"
-              :current-video-progress="currentVideoProgress"
-            />
-          <p class="next-action" role="status">{{ nextActionText }}</p>
-        </section>
       </section>
 
-      <LogPanel :logs="logs" @clear="logs = []" />
+      <section class="work-column activity-column" aria-label="播放与运行记录">
+        <section class="task-surface" aria-label="当前播放任务">
+          <div class="task-context">
+            <el-icon class="task-icon" :size="22"><VideoPlay /></el-icon>
+            <div class="task-copy">
+              <span class="context-label">当前任务</span>
+              <strong :title="selectedCourse?.name || '还未选择课程'">{{ selectedCourse?.name || '还未选择课程' }}</strong>
+              <p :title="selectedAccount ? (selectedAccount.label || selectedAccount.user?.name || selectedAccount.username) : '还未选择账号'">
+                {{ selectedAccount ? (selectedAccount.label || selectedAccount.user?.name || selectedAccount.username) : '还未选择账号' }}
+              </p>
+            </div>
+          </div>
+          <PlaybackControls
+            :disabled="!selectedAccountId || !selectedCourseId || !session.logged_in"
+            :is-playing="isPlaying"
+            @start="handleStart"
+            @start-all="handleStartAll"
+            @stop="handleStop"
+            @stop-all="handleStopAll"
+          />
+          <PlaybackProgress
+            :status="playStatus"
+            :total-progress="totalProgress"
+            :current-video-progress="currentVideoProgress"
+          />
+          <p class="next-action" role="status">{{ nextActionText }}</p>
+        </section>
+
+        <LogPanel :logs="logs" @clear="logs = []" />
+      </section>
     </main>
-    <footer class="workspace-footer">
-      <span>登录账号 → 读取课程 → 开始播放</span>
-      <span>本地课程管理</span>
+
+    <footer class="status-bar" aria-label="应用状态">
+      <div class="status-identity">
+        <el-icon :size="16"><School /></el-icon>
+        <strong>课程工作台</strong>
+      </div>
+
+      <div class="status-session" :class="{ running: isPlaying }" role="status">
+        <i aria-hidden="true" />
+        <span>{{ isPlaying ? '正在播放' : '已就绪' }}</span>
+      </div>
+
+      <div class="status-counts" aria-label="数据统计">
+        <span><strong>{{ accounts.length }}</strong> 账号</span>
+        <span><strong>{{ courses.length }}</strong> 课程</span>
+        <span><strong>{{ chapters.length }}</strong> 章节</span>
+      </div>
+
+      <div class="status-selection" aria-label="当前选择">
+        <span class="selection-label">账号</span>
+        <strong :title="selectedAccount ? (selectedAccount.label || selectedAccount.user?.name || selectedAccount.username) : '未选择'">
+          {{ selectedAccount ? (selectedAccount.label || selectedAccount.user?.name || selectedAccount.username) : '未选择' }}
+        </strong>
+        <i class="status-divider" aria-hidden="true" />
+        <span class="selection-label">课程</span>
+        <strong :title="selectedCourse?.name || '未选择'">{{ selectedCourse?.name || '未选择' }}</strong>
+      </div>
+
+      <label class="theme-toggle" title="切换深色模式">
+        <span>深色</span>
+        <input class="theme-input" type="checkbox" aria-label="切换深色模式" />
+        <span class="theme-switch" aria-hidden="true" />
+      </label>
     </footer>
   </div>
 </template>
