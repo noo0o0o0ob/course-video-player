@@ -70,3 +70,8 @@ npm run electron:build
 凭据、Cookie、Token、会话、个人数据、抓包、日志和构建产物均为本地运行数据，不应提交。配置机密的加密功能面向 Windows；其他系统不支持时会拒绝明文保存机密。
 
 只在已获授权的测试环境和账号上使用。不要把密码、Cookie、Token 或包含这些内容的网络抓包写入源码或提交到版本库。
+
+## 贡献者
+
+- [Theycallmeuu](https://github.com/noo0o0o0ob)：项目维护与开发。
+- [OpenAI Codex](https://github.com/codex)：协助代码开发、问题排查与功能验证。
