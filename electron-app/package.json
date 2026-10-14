@@ -58,7 +58,7 @@
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "executableName": "课程视频自动播放",
       "icon": "public/icon.ico"
     },

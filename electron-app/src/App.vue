@@ -3,7 +3,7 @@
     <section class="first-launch-card">
       <header class="first-launch-header">
         <span class="about-mark"><el-icon :size="24"><School /></el-icon></span>
-        <div><span class="about-eyebrow">首次启动 · 使用前请阅读</span><h1 id="first-launch-title">免责声明</h1></div>
+        <div><span class="about-eyebrow">首次启动 · 使用前请阅读</span><h1 id="first-launch-title">用户协议与免责声明</h1></div>
       </header>
       <div class="first-launch-copy"><DisclaimerContent /></div>
       <p class="first-launch-status" role="status">
@@ -25,7 +25,7 @@
         <span class="titlebar-subtitle">课程工作台</span>
       </div>
       <div class="window-actions">
-        <button type="button" class="about-button" @click="aboutVisible = true" aria-label="关于与版本">关于</button>
+        <button type="button" class="about-button" @click="aboutVisible = true; loadUsageChart()" aria-label="关于与版本">关于</button>
         <button type="button" aria-label="最小化" title="最小化" @click="minimizeWindow"><span class="minimize-glyph" /></button>
         <button type="button" class="window-close" aria-label="关闭" title="关闭" @click="closeWindow"><span>×</span></button>
       </div>
@@ -55,6 +55,8 @@
           :chapters="chapters"
           :selected-course-id="selectedCourseId"
           :loading="courseLoading"
+          :chapter-loading="chapterLoading"
+          :chapter-error="chapterError"
           :account-ready="session.logged_in"
           @refresh="loadCourses"
           @select-course="selectCourse"
@@ -74,7 +76,8 @@
             </div>
           </div>
           <PlaybackControls
-            :disabled="!selectedAccountId || !selectedCourseId || !session.logged_in"
+            :disabled="!playbackReady"
+            :busy="courseBusy"
             :is-playing="isPlaying"
             @start="handleStart"
             @start-all="handleStartAll"
@@ -88,14 +91,14 @@
           />
           <p class="next-action" role="status">{{ nextActionText }}</p>
           <div class="watch-options">
-            <el-switch v-model="fullAutoMode" active-text="全自动观看模式" aria-label="全自动观看模式" :disabled="accounts.some(account => account.is_playing)" @change="saveWatchSettings" />
-            <el-button size="small" @click="settingsVisible = true">观看设置</el-button>
+            <el-switch v-model="fullAutoMode" active-text="全自动观看模式" aria-label="全自动观看模式" :disabled="courseBusy || accounts.some(account => account.is_playing)" @change="saveWatchSettings" />
+            <el-button size="small" :disabled="courseBusy" @click="settingsVisible = true">观看设置</el-button>
           </div>
         </section>
 
         <div class="support-toolbar">
-          <el-button size="small" @click="summaryVisible = true">任务总结{{ taskSummaries.length ? ` (${taskSummaries.length})` : '' }}</el-button>
-          <el-button size="small" @click="helpVisible = true">错误排查{{ latestIssue ? ' · 有错误' : '' }}</el-button>
+          <el-button size="small" :disabled="courseBusy" @click="summaryVisible = true">任务总结{{ taskSummaries.length ? ` (${taskSummaries.length})` : '' }}</el-button>
+          <el-button size="small" :disabled="courseBusy" @click="helpVisible = true">错误排查{{ latestIssue ? ' · 有错误' : '' }}</el-button>
         </div>
 
         <LogPanel :logs="logs" @clear="logs = []" />
@@ -136,7 +139,7 @@
 
     <el-dialog v-model="aboutVisible" title="关于与更新" width="min(560px, 92vw)" class="support-dialog about-dialog">
       <div class="about-tabs" role="tablist" aria-label="关于与更新">
-        <button id="about-tab" type="button" role="tab" :aria-selected="aboutTab === 'about'" aria-controls="about-panel" @click="aboutTab = 'about'">关于</button>
+        <button id="about-tab" type="button" role="tab" :aria-selected="aboutTab === 'about'" aria-controls="about-panel" @click="aboutTab = 'about'; loadUsageChart()">关于</button>
         <button id="updates-tab" type="button" role="tab" :aria-selected="aboutTab === 'updates'" aria-controls="updates-panel" @click="aboutTab = 'updates'">更新内容</button>
         <button id="terms-tab" type="button" role="tab" :aria-selected="aboutTab === 'terms'" aria-controls="terms-panel" @click="aboutTab = 'terms'">协议与免责声明</button>
       </div>
@@ -149,6 +152,29 @@
           <div><span>当前版本</span><strong>{{ version }}</strong></div>
           <div><span>开源许可证</span><strong>GPL-3.0-only</strong></div>
         </div>
+        <section class="usage-stat-card" aria-labelledby="usage-stat-title">
+          <div class="usage-stat-heading">
+            <div><span class="about-eyebrow">匿名汇总 · 按日统计</span><h4 id="usage-stat-title">累计启动次数</h4></div>
+            <strong class="usage-stat-total">{{ usageStats ? usageStats.total.toLocaleString('zh-CN') : '—' }}<small> 次</small></strong>
+          </div>
+          <p class="usage-stat-message" role="status" aria-live="polite">{{ usageChartMessage }}</p>
+          <svg v-if="usageStats?.days?.length" class="usage-stat-chart" viewBox="0 0 540 180" role="img" :aria-label="`累计启动次数趋势，当前 ${usageStats.total} 次`">
+            <line x1="20" y1="145" x2="520" y2="145" class="usage-chart-axis" />
+            <polygon v-if="usageChartCoordinates.length > 1" :points="`20,145 ${usageChartPolyline} 520,145`" class="usage-chart-area" />
+            <polyline v-if="usageChartCoordinates.length > 1" :points="usageChartPolyline" class="usage-chart-line" />
+            <circle v-for="point in usageChartCoordinates" :key="point.date" :cx="point.x" :cy="point.y" r="3" class="usage-chart-point">
+              <title>{{ point.date }}：累计 {{ point.value }} 次</title>
+            </circle>
+            <text :x="usageChartCoordinates.length === 1 ? 270 : 20" y="169" :text-anchor="usageChartCoordinates.length === 1 ? 'middle' : 'start'" class="usage-chart-label">{{ usageChartFirstDate }}</text>
+            <text v-if="usageChartFirstDate !== usageChartLastDate" x="520" y="169" text-anchor="end" class="usage-chart-label">{{ usageChartLastDate }}</text>
+          </svg>
+          <svg v-else-if="usageChartAvailable" class="usage-stat-chart" viewBox="0 0 540 180" role="img" aria-label="累计启动次数趋势暂无记录">
+            <line x1="20" y1="145" x2="520" y2="145" class="usage-chart-axis" />
+            <line x1="20" y1="89" x2="520" y2="89" class="usage-chart-axis usage-chart-guide" />
+            <text x="270" y="78" text-anchor="middle" class="usage-chart-empty-label">首次启动记录出现后显示趋势</text>
+          </svg>
+          <p class="usage-stat-note">每次启动计一次，不代表独立使用人数。</p>
+        </section>
         <el-button class="project-button" @click="openProject">打开项目仓库</el-button>
       </section>
       <section v-else-if="aboutTab === 'updates'" id="updates-panel" role="tabpanel" aria-labelledby="updates-tab" class="updates-content">
@@ -179,6 +205,8 @@
           <p>登录信息会发送到你填写的学习平台地址以完成登录。选择记住密码时，应用会通过本机的安全存储保存凭据。请妥善保管设备和账号，不要在公用设备上保存密码。</p>
           <h4>观看任务</h4>
           <p>开始任务前请核对账号、课程和观看设置，并留意任务状态。退出应用会停止本地后端，正在执行的任务也会结束。</p>
+          <h4>匿名启动次数统计</h4>
+          <p>接受协议即启用每次启动一次的匿名统计，没有单独开关；不同意请勿使用并选择退出。统计指标是启动次数，不是人数。</p>
           <h4>协议确认</h4>
           <p>使用前请阅读本协议与下方免责声明。若不同意其中所述的使用范围，请勿使用本应用。</p>
         </article>
@@ -290,6 +318,13 @@ const selectedAccountId = ref('')
 const selectedCourseId = ref('')
 const loginLoading = ref(false)
 const courseLoading = ref(false)
+const chapterLoading = ref(false)
+const chapterReady = ref(false)
+const chapterError = ref('')
+const courseBusy = computed(() => courseLoading.value || chapterLoading.value)
+let courseListRequestId = 0
+let courseDetailRequestId = 0
+let courseProgressRequestId = 0
 const isPlaying = ref(false)
 const playStatus = ref('等待开始')
 const currentVideoProgress = ref(0)
@@ -314,10 +349,13 @@ const diagnosticMessage = ref('')
 const pendingConfirmation = ref(null)
 const closeConfirmation = ref(null)
 const rememberCloseChoice = ref(false)
-const DISCLAIMER_ACCEPTED_KEY = 'course-player-disclaimer-accepted-v1'
+const DISCLAIMER_ACCEPTED_KEY = 'course-player-disclaimer-accepted-v2'
 const disclaimerAccepted = ref(readDisclaimerAcceptance())
 const disclaimerRemaining = ref(5)
 const disclaimerError = ref('')
+const usageStats = ref(null)
+const usageChartAvailable = ref(false)
+const usageChartMessage = ref('打开“关于”时读取公开汇总数据。')
 let disclaimerTimer = null
 let removeCloseConfirmationListener = null
 let removeUpdateStatusListener = null
@@ -339,6 +377,50 @@ function acceptDisclaimer() {
   disclaimerAccepted.value = true
   disclaimerError.value = ''
   void initializeApplication()
+}
+
+const usageChartCoordinates = computed(() => {
+  const days = usageStats.value?.days || []
+  if (!days.length) return []
+  const maximum = Math.max(1, ...days.map(day => Number(day.cumulative) || 0))
+  return days.map((day, index) => ({
+    date: day.date,
+    value: Number(day.cumulative) || 0,
+    x: days.length === 1 ? 270 : 20 + index * 500 / (days.length - 1),
+    y: 145 - ((Number(day.cumulative) || 0) / maximum) * 112
+  }))
+})
+const usageChartPolyline = computed(() => usageChartCoordinates.value.map(point => `${point.x},${point.y}`).join(' '))
+const usageChartFirstDate = computed(() => usageChartCoordinates.value[0]?.date || '')
+const usageChartLastDate = computed(() => usageChartCoordinates.value.at(-1)?.date || '')
+
+async function loadUsageChart() {
+  let readChart = window.desktopAPI?.getUsageChart
+  if (!readChart && import.meta.env.DEV) {
+    readChart = async () => {
+      const response = await fetch('https://download.meetuu.top/api/usage/chart', { cache: 'no-store' })
+      if (!response.ok) throw new Error('statistics unavailable')
+      return response.json()
+    }
+  }
+  if (!readChart) {
+    usageStats.value = null
+    usageChartAvailable.value = false
+    usageChartMessage.value = '请在桌面客户端中查看统计图表。'
+    return
+  }
+  usageChartMessage.value = '正在读取统计数据…'
+  try {
+    const result = await readChart()
+    if (!result || !Number.isFinite(result.total) || !Array.isArray(result.days)) throw new Error('invalid chart')
+    usageStats.value = result
+    usageChartAvailable.value = true
+    usageChartMessage.value = result.days.length ? '按日期汇总，读取时更新。' : '目前还没有启动记录。'
+  } catch {
+    usageStats.value = null
+    usageChartAvailable.value = false
+    usageChartMessage.value = '暂时无法读取统计数据，请稍后再试。'
+  }
 }
 
 function declineDisclaimer() {
@@ -552,7 +634,12 @@ const session = computed(() => ({
   user: selectedAccount.value?.user || null
 }))
 
+const playbackReady = computed(() => !courseBusy.value && chapterReady.value && Boolean(selectedAccountId.value && selectedCourseId.value && session.value.logged_in))
+
 const nextActionText = computed(() => {
+  if (chapterLoading.value) return '加载中，正在同步课程节点，请等待完成后再操作。'
+  if (courseLoading.value) return '加载中，正在读取课程列表，请稍候。'
+  if (chapterError.value) return '课程节点加载失败，请重新点击所选课程重试。'
   if (!selectedAccountId.value || !session.value.logged_in) {
     return '第 1 步：在左侧填写平台地址、账号和密码并登录；已有账号时选择在线账号。'
   }
@@ -577,6 +664,13 @@ function addLog(message, level = 'info') {
 }
 
 function resetCourseSelection() {
+  courseListRequestId += 1
+  courseDetailRequestId += 1
+  courseProgressRequestId += 1
+  courseLoading.value = false
+  chapterLoading.value = false
+  chapterReady.value = false
+  chapterError.value = ''
   const nextState = getEmptyCourseSelection()
   selectedCourseId.value = nextState.selectedCourseId
   courses.value = nextState.courses
@@ -591,7 +685,7 @@ function syncSelectedStatus() {
   isPlaying.value = accountRunning(account)
   playStatus.value = status.status_text || status.message || (isPlaying.value ? '运行中' : '等待开始')
   currentVideoProgress.value = status.current_video_progress || 0
-  totalProgress.value = status.total_progress || 0
+  applyCourseProgress({ progress: status.total_progress || 0 })
 }
 
 function applyEvent(event) {
@@ -654,7 +748,7 @@ function applyEvent(event) {
     currentVideoProgress.value = event.current_video_progress
   }
   if (typeof event.total_progress === 'number') {
-    totalProgress.value = event.total_progress
+    applyCourseProgress({ progress: event.total_progress })
   }
   if (event.status_text || event.message) {
     playStatus.value = event.status_text || event.message
@@ -662,6 +756,10 @@ function applyEvent(event) {
 }
 
 function applyCourseProgress(progress) {
+  if (courses.value.some((course) => course.course_id === selectedCourseId.value && course.kind === 'finish')) {
+    totalProgress.value = 100
+    return
+  }
   if (!progress || typeof progress !== 'object') {
     return
   }
@@ -675,11 +773,16 @@ async function syncCourseProgress(courseId = selectedCourseId.value) {
   if (!selectedAccountId.value || !courseId) {
     return
   }
+  const accountId = selectedAccountId.value
+  const requestId = ++courseProgressRequestId
+  const isCurrent = () => requestId === courseProgressRequestId && accountId === selectedAccountId.value && courseId === selectedCourseId.value
   try {
-    const result = await getAccountCourseProgress(selectedAccountId.value, courseId)
+    const result = await getAccountCourseProgress(accountId, courseId)
+    if (!isCurrent()) return
     applyCourseProgress(result.progress)
     playStatus.value = '已同步课程进度'
   } catch (error) {
+    if (!isCurrent()) return
     addLog(`课程进度同步失败: ${error.message}`, 'warn')
   }
 }
@@ -689,15 +792,29 @@ async function syncCourseData(courseId) {
     return
   }
 
+  const accountId = selectedAccountId.value
+  const requestId = ++courseDetailRequestId
+  const isCurrent = () => requestId === courseDetailRequestId && accountId === selectedAccountId.value && courseId === selectedCourseId.value
+  chapterLoading.value = true
+  chapterReady.value = false
+  chapterError.value = ''
+  playStatus.value = '正在同步课程节点'
   try {
-    const chaptersResult = await getAccountChapters(selectedAccountId.value, courseId)
-    chapters.value = chaptersResult.chapters || []
-    applyCourseProgress(chaptersResult.progress)
-    playStatus.value = '已同步课程进度'
+    const chaptersResult = await getAccountChapters(accountId, courseId)
+    if (!isCurrent()) return
     const course = courses.value.find((item) => item.course_id === courseId)
+    chapters.value = (chaptersResult.chapters || []).map((chapter) => course?.kind === 'finish' ? { ...chapter, study_state: 2 } : chapter)
+    applyCourseProgress(chaptersResult.progress)
+    chapterReady.value = true
+    playStatus.value = '已同步课程进度'
     addLog(`已同步 ${course?.name || courseId}, 共 ${chapters.value.length} 个节点`)
   } catch (error) {
+    if (!isCurrent()) return
+    chapterError.value = error.message
+    playStatus.value = '课程节点加载失败'
     addLog(`课程数据同步失败: ${error.message}`, 'error')
+  } finally {
+    if (isCurrent()) chapterLoading.value = false
   }
 }
 
@@ -759,7 +876,11 @@ async function handleLogin(payload) {
   try {
     const result = await loginAccount(payload.username, payload.password, '', payload.profileId, payload.platformUrl)
     if (payload.remember) {
-      await saveCredentials(payload)
+      try {
+        await saveCredentials(payload)
+      } catch {
+        addLog('账号已登录，但登录信息未保存。请检查本机加密存储或磁盘权限，下次启动需重新填写。', 'warn')
+      }
     }
     await refreshAccounts()
     selectedAccountId.value = result.account?.account_id || selectedAccountId.value
@@ -774,11 +895,12 @@ async function handleLogin(payload) {
 }
 
 async function saveCredentials(payload) {
-  await window.desktopAPI?.saveCredentials?.({
+  const result = await window.desktopAPI?.saveCredentials?.({
     platformUrl: payload.platformUrl,
     username: payload.username,
     password: payload.password
   })
+  if (result?.status === false) throw new Error('登录信息未保存')
 }
 
 async function clearCredentials() {
@@ -805,37 +927,56 @@ async function removeSelectedAccount(accountId) {
 }
 
 async function loadCourses() {
+  if (chapterLoading.value) return
   if (!selectedAccountId.value) {
     addLog('请先选择一个账号', 'warn')
     return
   }
+  const accountId = selectedAccountId.value
+  const requestId = ++courseListRequestId
+  const isCurrent = () => requestId === courseListRequestId && accountId === selectedAccountId.value
   courseLoading.value = true
   try {
-    const result = await getAccountCourses(selectedAccountId.value)
+    const result = await getAccountCourses(accountId)
+    if (!isCurrent()) return
     courses.value = result.courses || []
     if (selectedCourseId.value && !courses.value.some((course) => course.course_id === selectedCourseId.value)) {
+      courseDetailRequestId += 1
+      courseProgressRequestId += 1
       selectedCourseId.value = ''
       chapters.value = []
+      chapterReady.value = false
+      chapterError.value = ''
       currentVideoProgress.value = 0
       totalProgress.value = 0
     }
+    if (courses.value.some((course) => course.course_id === selectedCourseId.value && course.kind === 'finish')) {
+      chapters.value = chapters.value.map((chapter) => ({ ...chapter, study_state: 2 }))
+      applyCourseProgress()
+    }
     addLog(`已刷新课程列表, 共 ${courses.value.length} 门`)
   } catch (error) {
+    if (!isCurrent()) return
     addLog(`课程加载失败: ${error.message}`, 'error')
   } finally {
-    courseLoading.value = false
+    if (isCurrent()) courseLoading.value = false
   }
 }
 
 async function selectCourse(courseId) {
+  if (courseBusy.value) return
+  courseDetailRequestId += 1
+  courseProgressRequestId += 1
   selectedCourseId.value = courseId
   chapters.value = []
   currentVideoProgress.value = 0
   totalProgress.value = 0
+  applyCourseProgress()
   await syncCourseData(courseId)
 }
 
 async function handleStart() {
+  if (!playbackReady.value) return
   try {
     const result = await startAccountPlay(selectedAccountId.value, selectedCourseId.value, watchOptions())
     if (result.status === false) throw new Error(result.message || '任务未启动')
@@ -849,6 +990,7 @@ async function handleStart() {
 }
 
 async function handleStop() {
+  if (courseBusy.value) return
   try {
     const result = await stopAccountPlay(selectedAccountId.value)
     playStatus.value = '正在停止'
@@ -866,10 +1008,12 @@ function recordBatchStartFailures(results, courseId) {
 }
 
 async function handleStartAll() {
+  if (!playbackReady.value) return
   if (!selectedCourseId.value || !accounts.value.length) return
   const courseId = selectedCourseId.value
   if (!await confirmOperation({ title: '确认全部账号开始', message: `将为账号池中的 ${accounts.value.length} 个账号尝试启动「${selectedCourse.value?.name || selectedCourseId.value}」。`, scope: accounts.value.map(account => `${accountName(account)} · ${accountRunning(account) ? '已有任务，不重复启动' : account.logged_in ? '将尝试启动' : '未登录，将跳过'}`), detail: '所有账号使用同一课程编号和当前观看设置；没有该课程或登录失效的账号会失败，结果列入任务总结。', button: '确认全部开始' })) return
   try {
+    if (!playbackReady.value || courseId !== selectedCourseId.value) return
     const result = await startAllAccountPlay(courseId, watchOptions())
     recordBatchStartFailures(result.results, courseId)
     if (result.status === false) throw new Error(result.message || '没有账号启动成功')
@@ -882,6 +1026,7 @@ async function handleStartAll() {
 }
 
 async function handleStopAll() {
+  if (courseBusy.value) return
   const running = accounts.value.filter(accountRunning)
   if (!await confirmOperation({ title: '确认全部账号停止', message: `将向全部 ${accounts.value.length} 个账号发送停止指令，其中 ${running.length} 个账号仍有运行或正在停止的任务。`, scope: accounts.value.map(account => `${accountName(account)} · ${accountRunning(account) ? '将停止任务' : '无运行任务'}`), detail: '当前未完成章节会中断，已由平台确认的进度保留。停止需要等待正在执行的请求结束，可稍后重试未完成任务。', button: '确认全部停止' })) return
   try {
@@ -897,6 +1042,7 @@ async function handleStopAll() {
 async function initializeApplication() {
   if (applicationInitialized) return
   applicationInitialized = true
+  void window.desktopAPI?.recordUsageLaunch?.()
   if (window.desktopAPI?.getVersion) version.value = await window.desktopAPI.getVersion()
   await initApiBase()
   connectEvents()
@@ -931,6 +1077,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  courseListRequestId += 1
+  courseDetailRequestId += 1
+  courseProgressRequestId += 1
   removeCloseConfirmationListener?.()
   removeUpdateStatusListener?.()
   if (disclaimerTimer) window.clearInterval(disclaimerTimer)

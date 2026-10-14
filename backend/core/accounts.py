@@ -134,11 +134,21 @@ class AccountManager:
 
     def get_progress(self, account_id: str, course_id: str) -> dict[str, Any]:
         account = self.get_account(account_id)
+        if self._course_finished(account, course_id):
+            return {"progress": 100, "completed": 0}
         return account.player.get_user_progress(course_id)
+
+    @staticmethod
+    def _course_finished(account: AccountContext, course_id: str) -> bool:
+        return any(str(course.get("course_id")) == str(course_id) and course.get("kind") == "finish" for course in account.courses_cache)
 
     def get_course_snapshot(self, account_id: str, course_id: str) -> dict[str, Any]:
         account = self.get_account(account_id)
         chapters = account.player.get_chapters(course_id)
+        if self._course_finished(account, course_id):
+            for chapter in chapters:
+                chapter["study_state"] = 2
+            return {"chapters": chapters, "progress": {"progress": 100, "completed": len(chapters), "total": len(chapters)}}
         completed = 0
         for chapter in chapters:
             try:

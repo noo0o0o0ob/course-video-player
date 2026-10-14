@@ -1,0 +1,11 @@
+{
+  "name": "course-usage-stats",
+  "version": "1.0.0",
+  "private": true,
+  "description": "课程工作台匿名累计启动次数 API",
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node --test server.test.cjs"
+  }
+}

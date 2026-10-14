@@ -387,6 +387,38 @@ class PlayerRegressionTests(unittest.TestCase):
             return response(ended if parse_qs(urlsplit(url).query).get("kind") == ["finish"] else current)
         self.player.session.get.side_effect = get
         self.assertEqual([item["course_id"] for item in self.player.get_courses()], ["1", "2"])
+        self.assertTrue(all(item["kind"] == "finish" for item in self.player.get_courses()))
+
+    def test_finished_course_snapshot_keeps_completion_when_node_state_is_unavailable(self):
+        manager = AccountManager()
+        manager._accounts["synthetic"] = AccountContext("synthetic", "synthetic-user", self.player)
+        manager._accounts["synthetic"].courses_cache = [{"course_id": "1", "kind": "finish"}]
+        self.player.get_chapters = Mock(return_value=[{"node_id": "1"}, {"node_id": "2"}])
+        self.player.get_study_state = Mock(side_effect=ValueError("合成状态不可用"))
+        self.player.get_user_progress = Mock(return_value={"progress": 0, "completed": 0})
+        snapshot = manager.get_course_snapshot("synthetic", "1")
+        self.assertEqual(snapshot["progress"], {"progress": 100, "completed": 2, "total": 2})
+        self.assertEqual([chapter["study_state"] for chapter in snapshot["chapters"]], [2, 2])
+        self.assertEqual(manager.get_progress("synthetic", "1")["progress"], 100)
+
+    def test_finished_course_without_chapters_keeps_full_progress(self):
+        manager = AccountManager()
+        manager._accounts["synthetic"] = AccountContext("synthetic", "synthetic-user", self.player)
+        manager._accounts["synthetic"].courses_cache = [{"course_id": "1", "kind": "finish"}]
+        self.player.get_chapters = Mock(return_value=[])
+        self.player.get_user_progress = Mock(return_value={"progress": 0, "completed": 0})
+        self.assertEqual(manager.get_course_snapshot("synthetic", "1")["progress"]["progress"], 100)
+
+    def test_current_course_unknown_state_is_not_completed(self):
+        manager = AccountManager()
+        manager._accounts["synthetic"] = AccountContext("synthetic", "synthetic-user", self.player)
+        manager._accounts["synthetic"].courses_cache = [{"course_id": "1", "kind": "current"}]
+        self.player.get_chapters = Mock(return_value=[{"node_id": "1"}])
+        self.player.get_study_state = Mock(side_effect=ValueError("合成状态不可用"))
+        self.player.get_user_progress = Mock(return_value={"progress": 0, "completed": 0})
+        snapshot = manager.get_course_snapshot("synthetic", "1")
+        self.assertIsNone(snapshot["chapters"][0]["study_state"])
+        self.assertEqual(snapshot["progress"]["progress"], 0)
 
     def test_empty_report_response_is_not_success(self):
         self.player.session.post.return_value = response("", "/user/node/study")

@@ -32,7 +32,7 @@ describe('平铺课程工作台', () => {
   let accountState
   async function confirmPending() {
     await flushPromises()
-    const button = wrapper.findAll('.el-dialog button').find(button => /确认全部开始|确认全部停止|移除该账号/.test(button.text()))
+    const button = wrapper.findAll('.el-dialog button').find(button => /确认登录|确认全部开始|确认全部停止|移除该账号/.test(button.text()))
     expect(button).toBeDefined()
     await button.trigger('click')
     await flushPromises()
@@ -41,6 +41,7 @@ describe('平铺课程工作台', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    localStorage.setItem('course-player-disclaimer-accepted-v2', 'accepted')
     accountState = [{ account_id: 'demo-a', username: '演示账号甲', logged_in: true, is_playing: false }]
     api.getAccounts.mockImplementation(async () => ({ accounts: accountState.map(account => ({ ...account })) }))
     api.getAccountCourses.mockResolvedValue({ courses: [{ course_id: 'course-a', name: '演示课程' }] })
@@ -56,6 +57,10 @@ describe('平铺课程工作台', () => {
     api.startAllAccountPlay.mockImplementation(api.startAccountPlay.getMockImplementation())
     api.stopAllAccountPlay.mockImplementation(api.stopAccountPlay.getMockImplementation())
     window.desktopAPI = {
+      getVersion: vi.fn(async () => '0.1.0'),
+      getUsageChart: vi.fn(async () => ({ total: 0, days: [] })),
+      onCloseConfirmation: vi.fn(() => () => {}),
+      respondToClose: vi.fn(),
       loadCredentials: vi.fn(async () => null),
       saveCredentials: vi.fn(async () => ({ status: true })),
       clearCredentials: vi.fn(async () => ({ status: true }))
@@ -77,6 +82,216 @@ describe('平铺课程工作台', () => {
   afterEach(() => {
     wrapper.unmount()
     delete window.desktopAPI
+  })
+
+  test('已结束课程覆盖未知章节状态和旧进度，空章节仍显示已结束', async () => {
+    await flushPromises()
+    api.getAccountCourses.mockResolvedValue({ courses: [{ course_id: 'course-a', name: '演示课程', kind: 'finish' }] })
+    wrapper.findComponent(CoursePanel).vm.$emit('refresh')
+    await flushPromises()
+    api.getAccountChapters.mockResolvedValue({ chapters: [{ node_id: 'node-a', name: '第一章', study_state: null }], progress: { progress: 0 } })
+    wrapper.findComponent(CoursePanel).vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    expect(wrapper.findComponent(CoursePanel).text()).toContain('已完成')
+    expect(wrapper.findComponent(CoursePanel).text()).not.toContain('未开始')
+    expect(wrapper.findComponent(PlaybackProgress).props('totalProgress')).toBe(100)
+    const onEvent = api.createEventSocket.mock.calls.at(-1)[0]
+    onEvent({ type: 'status', account_id: 'demo-a', total_progress: 0 })
+    wrapper.findComponent(AccountPool).vm.$emit('refresh')
+    await flushPromises()
+    expect(wrapper.findComponent(PlaybackProgress).props('totalProgress')).toBe(100)
+    api.getAccountChapters.mockResolvedValue({ chapters: [], progress: { progress: 0 } })
+    wrapper.findComponent(CoursePanel).vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    expect(wrapper.findComponent(CoursePanel).text()).toContain('这门课程已结束')
+    expect(wrapper.findComponent(PlaybackProgress).props('totalProgress')).toBe(100)
+  })
+
+  test('章节状态未知时显示状态未知，只有零状态显示未开始', async () => {
+    await flushPromises()
+    api.getAccountChapters.mockResolvedValue({ chapters: [{ node_id: 'unknown', name: '未知章', study_state: null }, { node_id: 'idle', name: '待学章', study_state: 0 }] })
+    wrapper.findComponent(CoursePanel).vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    const rows = wrapper.findAll('.chapter-row')
+    expect(rows[0].text()).toContain('状态未知')
+    expect(rows[0].text()).not.toContain('未开始')
+    expect(rows[1].text()).toContain('未开始')
+  })
+
+  test('切换账号后丢弃旧账号迟到的课程列表', async () => {
+    accountState.push({ account_id: 'demo-b', logged_in: true })
+    await flushPromises()
+    wrapper.findComponent(AccountPool).vm.$emit('refresh')
+    await flushPromises()
+    let resolveOld
+    api.getAccountCourses.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    wrapper.findComponent(CoursePanel).vm.$emit('refresh')
+    await flushPromises()
+    wrapper.findComponent(AccountPool).vm.$emit('select', 'demo-b')
+    await flushPromises()
+    expect(wrapper.findComponent(CoursePanel).props('loading')).toBe(false)
+    resolveOld({ courses: [{ course_id: 'only-a', name: '仅甲账号课程' }] })
+    await flushPromises()
+    expect(wrapper.findComponent(AccountPool).props('selectedAccountId')).toBe('demo-b')
+    expect(wrapper.findComponent(CoursePanel).props('courses')).toEqual([])
+  })
+
+  test('同账号重复读取课程时只应用最新请求，旧请求不结束新请求的加载状态', async () => {
+    await flushPromises()
+    let resolveOld, resolveNew
+    api.getAccountCourses
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveNew = resolve }))
+    const panel = wrapper.findComponent(CoursePanel)
+    panel.vm.$emit('refresh')
+    await flushPromises()
+    panel.vm.$emit('refresh')
+    await flushPromises()
+    resolveOld({ courses: [{ course_id: 'old', name: '旧课程' }] })
+    await flushPromises()
+    expect(panel.props('loading')).toBe(true)
+    expect(panel.props('courses')).toEqual([])
+    resolveNew({ courses: [{ course_id: 'new', name: '新课程' }] })
+    await flushPromises()
+    expect(panel.props('courses')[0].course_id).toBe('new')
+    expect(panel.props('loading')).toBe(false)
+  })
+
+  test('同步节点时锁住课程切换、重复请求和右侧操作，成功后恢复', async () => {
+    await flushPromises()
+    wrapper.findComponent(CoursePanel).vm.$emit('refresh')
+    await flushPromises()
+    let resolveOld
+    api.getAccountChapters.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const panel = wrapper.findComponent(CoursePanel)
+    panel.vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    expect(panel.props('chapterLoading')).toBe(true)
+    expect(panel.find('[aria-busy="true"]').text()).toContain('加载中')
+    expect(wrapper.find('.next-action').text()).toContain('加载中')
+    expect(panel.get('.course-option').attributes('disabled')).toBeDefined()
+    expect(panel.get('input').attributes('disabled')).toBeDefined()
+    for (const button of wrapper.findAll('.task-surface button, .support-toolbar button')) {
+      expect(button.attributes('disabled')).toBeDefined()
+    }
+    const courseRequests = api.getAccountCourses.mock.calls.length
+    panel.vm.$emit('select-course', 'course-a')
+    panel.vm.$emit('select-course', 'course-b')
+    panel.vm.$emit('refresh')
+    const controls = wrapper.findComponent(PlaybackControls)
+    for (const event of ['start', 'start-all', 'stop', 'stop-all']) controls.vm.$emit(event)
+    await flushPromises()
+    expect(api.getAccountChapters).toHaveBeenCalledTimes(1)
+    expect(api.getAccountCourses).toHaveBeenCalledTimes(courseRequests)
+    expect(panel.props('selectedCourseId')).toBe('course-a')
+    expect(api.startAccountPlay).not.toHaveBeenCalled()
+    expect(api.startAllAccountPlay).not.toHaveBeenCalled()
+    expect(api.stopAccountPlay).not.toHaveBeenCalled()
+    expect(api.stopAllAccountPlay).not.toHaveBeenCalled()
+    resolveOld({ chapters: [{ node_id: 'node-a', name: '甲章节' }], progress: { progress: 10 } })
+    await flushPromises()
+    expect(panel.props('chapterLoading')).toBe(false)
+    expect(panel.props('chapters')[0].node_id).toBe('node-a')
+    expect(controls.props('disabled')).toBe(false)
+    expect(panel.get('.course-option').attributes('disabled')).toBeUndefined()
+    panel.vm.$emit('select-course', 'course-b')
+    await flushPromises()
+    expect(api.getAccountChapters).toHaveBeenCalledTimes(2)
+  })
+
+  test('切换账号后旧章节响应不会覆盖新账号数据或提前解锁', async () => {
+    await flushPromises()
+    let resolveOld
+    let resolveNew
+    api.getAccountChapters.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const panel = wrapper.findComponent(CoursePanel)
+    panel.vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    wrapper.findComponent(AccountPool).vm.$emit('select', 'demo-b')
+    await flushPromises()
+    expect(panel.props('chapterLoading')).toBe(false)
+    api.getAccountChapters.mockImplementationOnce(() => new Promise(resolve => { resolveNew = resolve }))
+    panel.vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    resolveOld({ chapters: [{ node_id: 'old-a', name: '旧甲章节' }] })
+    await flushPromises()
+    expect(panel.props('chapterLoading')).toBe(true)
+    expect(panel.props('chapters')).toEqual([])
+    resolveNew({ chapters: [{ node_id: 'new-a', name: '最新甲章节' }] })
+    await flushPromises()
+    expect(panel.props('chapterLoading')).toBe(false)
+    expect(panel.props('selectedCourseId')).toBe('course-a')
+    expect(panel.props('chapters')[0].node_id).toBe('new-a')
+  })
+
+  test('节点请求失败后解除切换锁但禁止播放，重试成功后恢复播放', async () => {
+    await flushPromises()
+    api.getAccountChapters.mockRejectedValueOnce(new Error('合成加载失败'))
+    const panel = wrapper.findComponent(CoursePanel)
+    panel.vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    expect(panel.props('chapterLoading')).toBe(false)
+    expect(panel.find('[role="alert"]').text()).toContain('合成加载失败')
+    expect(wrapper.findComponent(PlaybackControls).props('disabled')).toBe(true)
+    wrapper.findComponent(PlaybackControls).vm.$emit('start')
+    await flushPromises()
+    expect(api.startAccountPlay).not.toHaveBeenCalled()
+    await panel.find('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(panel.props('chapterError')).toBe('')
+    expect(wrapper.findComponent(PlaybackControls).props('disabled')).toBe(false)
+  })
+
+  test.each([false, true])('后端不可用的退出弹窗向主进程提交明确选择：%s', async close => {
+    await flushPromises()
+    window.desktopAPI.onCloseConfirmation.mock.calls[0][0]({ kind: 'unavailable', title: '无法确认观看任务状态', message: '本地后端暂时无法连接，是否强制退出软件？', detail: '未确认的进度可能丢失', closeLabel: '强制退出软件' })
+    await flushPromises()
+    expect(wrapper.find('.close-confirm-dialog').text()).toContain('未确认的进度可能丢失')
+    const buttons = wrapper.findAll('.close-confirm-dialog button')
+    const button = buttons.find(button => button.text() === (close ? '强制退出软件' : '取消'))
+    await button.trigger('click')
+    await flushPromises()
+    expect(window.desktopAPI.respondToClose).toHaveBeenCalledWith({ close, remember: false })
+  })
+
+  test('首次启动在明确同意协议前不初始化账号与事件连接', async () => {
+    wrapper.unmount()
+    vi.clearAllMocks()
+    localStorage.removeItem('course-player-disclaimer-accepted-v2')
+    vi.useFakeTimers()
+    try {
+      wrapper = mount(App, { global: { plugins: [ElementPlus], stubs: { teleport: true, ElOption: true, ElSelect: { template: '<div><slot /></div>' } } } })
+      await flushPromises()
+      expect(wrapper.find('.first-launch-shell').exists()).toBe(true)
+      expect(api.getAccounts).not.toHaveBeenCalled()
+      expect(api.createEventSocket).not.toHaveBeenCalled()
+      const accept = wrapper.findAll('button').find(button => button.text() === '同意并继续')
+      expect(accept.attributes('disabled')).toBeDefined()
+      await vi.advanceTimersByTimeAsync(5000)
+      await accept.trigger('click')
+      await flushPromises()
+      expect(wrapper.findComponent(AccountPool).exists()).toBe(true)
+      expect(api.getAccounts).toHaveBeenCalledOnce()
+      expect(api.createEventSocket).toHaveBeenCalledOnce()
+    } finally { vi.useRealTimers() }
+  })
+
+  test.each(['异常', '拒绝'])('凭据保存%s时登录仍成功并选中新账号', async (kind) => {
+    await flushPromises()
+    api.loginAccount.mockImplementation(async () => {
+      const account = { account_id: 'demo-b', username: '合成新账号', logged_in: true }
+      accountState.push(account)
+      return { status: true, account }
+    })
+    if (kind === '异常') window.desktopAPI.saveCredentials.mockRejectedValueOnce(new Error('合成写入失败'))
+    else window.desktopAPI.saveCredentials.mockResolvedValueOnce({ status: false, message: '当前系统不可用加密存储' })
+    wrapper.findComponent(LoginPanel).vm.$emit('login', { platformUrl: 'https://example.test', username: 'synthetic-user', password: 'synthetic-password', remember: true })
+    await confirmPending()
+    expect(api.loginAccount).toHaveBeenCalledOnce()
+    expect(wrapper.findComponent(AccountPool).props('selectedAccountId')).toBe('demo-b')
+    expect(wrapper.findComponent(LogPanel).text()).toContain('账号登录成功')
+    expect(wrapper.findComponent(LogPanel).text()).toContain('登录信息未保存')
+    expect(wrapper.findComponent(LogPanel).text()).not.toContain('登录失败:')
   })
 
   test('账号、课程、控制、进度与日志始终显示在同一页', async () => {
@@ -218,7 +433,7 @@ describe('平铺课程工作台', () => {
     await inputs[1].setValue('演示账号')
     await inputs[2].setValue('演示密码')
     await login.get('form').trigger('submit')
-    await flushPromises()
+    await confirmPending()
     expect(api.loginAccount).toHaveBeenCalledWith('演示账号', '演示密码', '', null, 'https://demo.invalid')
     expect(window.desktopAPI.saveCredentials).toHaveBeenCalledWith({ platformUrl: 'https://demo.invalid', username: '演示账号', password: '演示密码' })
     await login.findAll('button').find(button => button.text().includes('清除保存')).trigger('click')
@@ -318,9 +533,11 @@ describe('平铺课程工作台', () => {
     await flushPromises()
     await wrapper.get('[aria-label="关于与版本"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('版本 0.1.0')
-    expect(wrapper.text()).toContain('当前版本更新内容')
-    expect(wrapper.text()).toContain('https://github.com/noo0o0o0ob/course-video-player')
+    expect(wrapper.text()).toContain('0.1.0')
+    expect(wrapper.text()).toContain('打开项目仓库')
+    await wrapper.get('#updates-tab').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('当前版本内容')
   })
 
   test.each([false, true])('批量启动失败进入总结，刷新时不会被后端的旧结果覆盖（HTTP 错误：%s）', async (httpError) => {

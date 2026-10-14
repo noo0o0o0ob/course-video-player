@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   respondToClose: (decision) => ipcRenderer.send('app:close-decision', decision),
   exitApplication: () => ipcRenderer.send('app:decline-disclaimer'),
   getVersion: () => ipcRenderer.invoke('app:get-version'),
+  recordUsageLaunch: () => ipcRenderer.invoke('usage:record-launch'),
+  getUsageChart: () => ipcRenderer.invoke('usage:get-chart'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   downloadUpdate: () => ipcRenderer.invoke('updates:download'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),

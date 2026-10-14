@@ -480,8 +480,11 @@ class AutoPlayer:
                     name = ""
                 if course_id not in courses:
                     courses[course_id] = {"course_id": course_id, "id": course_id, "name": name or f"课程 {course_id}", "kind": section}
-                elif name and courses[course_id]["name"] == f"课程 {course_id}":
-                    courses[course_id]["name"] = name
+                else:
+                    if section == "finish":
+                        courses[course_id]["kind"] = "finish"
+                    if name and courses[course_id]["name"] == f"课程 {course_id}":
+                        courses[course_id]["name"] = name
         self.log(f"找到 {len(courses)} 门课程", count=len(courses))
         return list(courses.values())
 

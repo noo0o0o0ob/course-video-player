@@ -1,0 +1,25 @@
+[Unit]
+Description=Course Workbench Anonymous Usage Statistics API
+After=network.target
+
+[Service]
+Type=simple
+User=course-usage
+Group=course-usage
+WorkingDirectory=/opt/course-usage-stats
+EnvironmentFile=/etc/course-usage-stats.env
+Environment=USAGE_STATS_DATABASE=/var/lib/course-usage-stats/usage.sqlite3
+Environment=USAGE_STATS_PORT=31876
+ExecStart=/usr/bin/node /opt/course-usage-stats/server.cjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/course-usage-stats
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

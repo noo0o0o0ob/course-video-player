@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
+const https = require('https')
 const { spawn } = require('child_process')
 const { randomBytes } = require('node:crypto')
 const { pathToFileURL } = require('node:url')
@@ -14,6 +15,8 @@ let backendProcess
 let tray
 let quitAllowed = false
 let closeRequestPending = false
+let usageLaunchAttempted = false
+const usageApiBase = 'https://download.meetuu.top/api/usage/'
 
 let backendPort = 8765
 const backendToken = randomBytes(32).toString('hex')
@@ -37,6 +40,15 @@ autoUpdater.on('error', () => sendUpdateStatus({ status: 'error', message: '暂�
 app.setName('课程视频自动播放')
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.cqcst.course-video-player')
+}
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  quitAllowed = true
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) showMainWindow()
+  })
 }
 
 function getPreferencesPath() {
@@ -145,20 +157,35 @@ async function handleCloseRequest() {
       app.quit()
     }
   } catch (error) {
-    await requestCloseDecision({
-      kind: 'error',
+    const decision = await requestCloseDecision({
+      kind: 'unavailable',
       title: '无法确认观看任务状态',
-      message: '暂时不能关闭软件，因为无法确认观看任务是否已经停止。',
-      detail: error.message,
-      closeLabel: '知道了'
+      message: '本地后端暂时无法连接，是否强制退出软件？',
+      detail: '强制退出会结束本地后端和所有仍在运行的任务，未确认的进度可能丢失。取消可保留软件并稍后重试。',
+      closeLabel: '强制退出软件'
     })
+    if (decision.close) {
+      quitAllowed = true
+      app.quit()
+    }
   } finally {
     closeRequestPending = false
   }
 }
 
 function requestCloseDecision(details) {
-  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ close: false, remember: false })
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return dialog.showMessageBox({
+      type: 'warning',
+      title: details.title,
+      message: details.message,
+      detail: [details.accounts?.length ? `影响账号：${details.accounts.join('、')}` : '', details.detail].filter(Boolean).join('\n'),
+      buttons: ['取消', details.closeLabel],
+      defaultId: 0,
+      cancelId: 0,
+      ...(details.kind === 'idle' ? { checkboxLabel: '记住我的选择', checkboxChecked: false } : {})
+    }).then(result => ({ close: result.response === 1, remember: details.kind === 'idle' && result.checkboxChecked === true }))
+  }
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
@@ -168,7 +195,7 @@ function requestCloseDecision(details) {
       ipcMain.removeListener('app:close-decision', onDecision)
       resolve({ close: Boolean(decision?.close), remember: Boolean(decision?.remember) })
     }
-    ipcMain.once('app:close-decision', onDecision)
+    ipcMain.on('app:close-decision', onDecision)
     mainWindow.webContents.send('app:close-confirmation', details)
   })
 }
@@ -276,6 +303,13 @@ function createWindow() {
       nodeIntegration: false
     }
   })
+  if (process.platform === 'win32') {
+    mainWindow.setAppDetails({
+      appId: 'com.cqcst.course-video-player',
+      appIconPath: app.isPackaged ? process.execPath : path.join(__dirname, '..', 'public', 'icon.ico'),
+      appIconIndex: 0
+    })
+  }
   mainWindow.on('close', event => {
     if (!quitAllowed) {
       event.preventDefault()
@@ -305,6 +339,64 @@ function isTrustedPage(url) {
 function requireTrustedRenderer(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents || !isTrustedPage(event.senderFrame?.url || '')) throw new Error('请求来源不被允许')
 }
+
+function requestUsageApi(endpoint, method = 'GET', body = undefined) {
+  const url = new URL(endpoint, usageApiBase)
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, {
+      method,
+      headers: body === undefined ? { accept: 'application/json' } : {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body)
+      },
+      timeout: 4000
+    }, response => {
+      let data = ''
+      response.on('data', chunk => {
+        data += chunk.toString('utf8')
+        if (data.length > 64 * 1024) request.destroy(new Error('response too large'))
+      })
+      response.on('end', () => {
+        try {
+          const result = JSON.parse(data)
+          if (response.statusCode < 200 || response.statusCode >= 300) return reject(new Error('statistics request failed'))
+          resolve(result)
+        } catch { reject(new Error('statistics response unavailable')) }
+      })
+    })
+    request.on('timeout', () => request.destroy(new Error('statistics request timed out')))
+    request.on('error', () => reject(new Error('statistics request unavailable')))
+    if (body !== undefined) request.write(body)
+    request.end()
+  })
+}
+
+ipcMain.handle('usage:record-launch', async event => {
+  requireTrustedRenderer(event)
+  if (!app.isPackaged || usageLaunchAttempted) return { accepted: false }
+  usageLaunchAttempted = true
+  try {
+    const challenge = await requestUsageApi('challenge')
+    if (typeof challenge.challenge !== 'string') return { accepted: false }
+    const body = JSON.stringify({ challenge: challenge.challenge })
+    const result = await requestUsageApi('launch', 'POST', body)
+    return { accepted: result.accepted === true }
+  } catch {
+    return { accepted: false }
+  }
+})
+
+ipcMain.handle('usage:get-chart', async event => {
+  requireTrustedRenderer(event)
+  try {
+    const result = await requestUsageApi('chart')
+    if (!Number.isSafeInteger(result.total) || !Array.isArray(result.days)) throw new Error('invalid chart')
+    return result
+  } catch {
+    throw new Error('统计数据暂时不可用')
+  }
+})
 
 ipcMain.handle('app:get-backend-url', event => {
   requireTrustedRenderer(event)
@@ -413,6 +505,7 @@ ipcMain.handle('credentials:clear', event => {
 })
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return
   createTray()
   await startBackend()
   createWindow()
@@ -434,7 +527,7 @@ app.on('before-quit', event => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (hasSingleInstanceLock && BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
 })

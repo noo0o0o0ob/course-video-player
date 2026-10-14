@@ -35,6 +35,21 @@
 .about-meta span { color: var(--app-muted); font-size: 12px; }
 .about-meta strong { font-size: 14px; overflow-wrap: anywhere; }
 .project-button { width: 100%; }
+.usage-stat-card { margin: 0 0 16px; padding: 14px 16px 10px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-panel-muted); }
+.usage-stat-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.usage-stat-heading h4 { margin: 4px 0 0; font-size: 14px; }
+.usage-stat-total { color: var(--app-primary); font-size: 23px; font-variant-numeric: tabular-nums; }
+.usage-stat-total small { color: var(--app-muted); font-size: 12px; font-weight: 500; }
+.usage-stat-message { margin: 7px 0 0 !important; color: var(--app-muted); font-size: 12px; }
+.usage-stat-chart { display: block; width: 100%; height: 132px; overflow: visible; }
+.usage-chart-axis { stroke: var(--app-border); stroke-width: 1; }
+.usage-chart-guide { stroke-dasharray: 3 5; }
+.usage-chart-empty-label { fill: var(--app-muted); font-size: 11px; }
+.usage-chart-area { fill: var(--app-primary-soft); }
+.usage-chart-line { fill: none; stroke: var(--app-primary); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.4; }
+.usage-chart-point { fill: var(--app-panel); stroke: var(--app-primary); stroke-width: 2; }
+.usage-chart-label { fill: var(--app-muted); font-size: 10px; }
+.usage-stat-note { margin: 0 0 3px !important; color: var(--app-muted); font-size: 11px; }
 .updates-content h3 { margin: 5px 0 12px; }
 .update-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .update-panel-heading h3 { margin: 4px 0 0; }
@@ -159,6 +174,33 @@
 }
 
 * { box-sizing: border-box; }
+
+/* 统一原生滚动条外观，保留滚轮、键盘和拖动行为。 */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  min-width: 32px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--app-muted) 65%, var(--app-panel));
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: var(--app-muted); }
+*::-webkit-scrollbar-thumb:active { background-color: var(--app-ink); }
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--app-muted) transparent; }
+}
+
+.chapter-scroll, .log-viewport, .account-scroll, .course-options,
+.login-panel .el-card__body, .agreement-scroll, .support-scroll {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
 html, body, #app { width: 100%; height: 100%; min-width: 900px; min-height: 640px; margin: 0; overflow: hidden; }
 body { background: var(--app-bg); }
 h1, h2, p { margin: 0; }
