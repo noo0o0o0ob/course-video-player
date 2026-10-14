@@ -57,6 +57,8 @@ pnpm-debug.log*
 /RELEASE.md
 /download-site/
 /docs/superpowers/
+/scripts/
+/icon标.png
 
 # Local credentials, sessions, and exported data
 credentials.json

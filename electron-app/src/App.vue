@@ -1,5 +1,22 @@
 <template>
-  <div class="app-shell">
+  <main v-if="!disclaimerAccepted" class="first-launch-shell" aria-labelledby="first-launch-title">
+    <section class="first-launch-card">
+      <header class="first-launch-header">
+        <span class="about-mark"><el-icon :size="24"><School /></el-icon></span>
+        <div><span class="about-eyebrow">首次启动 · 使用前请阅读</span><h1 id="first-launch-title">免责声明</h1></div>
+      </header>
+      <div class="first-launch-copy"><DisclaimerContent /></div>
+      <p class="first-launch-status" role="status">
+        {{ disclaimerRemaining ? `请阅读以上内容，${disclaimerRemaining} 秒后可以同意并继续。` : '请确认你已阅读并理解以上免责声明。' }}
+      </p>
+      <p v-if="disclaimerError" class="first-launch-error" role="alert">{{ disclaimerError }}</p>
+      <footer class="first-launch-actions">
+        <el-button plain @click="declineDisclaimer">不同意并退出</el-button>
+        <el-button type="primary" :disabled="disclaimerRemaining > 0" @click="acceptDisclaimer">同意并继续</el-button>
+      </footer>
+    </section>
+  </main>
+  <div v-else class="app-shell">
     <header class="app-titlebar">
       <div class="titlebar-brand" aria-label="课程视频自动播放">
         <img class="titlebar-mark" :src="productIconUrl" alt="" aria-hidden="true" />
@@ -96,9 +113,10 @@
       </template>
       <template #footer>
         <el-button @click="cancelConfirmation">取消</el-button>
-        <el-button type="danger" @click="acceptConfirmation">{{ pendingConfirmation?.button }}</el-button>
+        <el-button :type="pendingConfirmation?.buttonType || 'danger'" @click="acceptConfirmation">{{ pendingConfirmation?.button }}</el-button>
       </template>
     </el-dialog>
+
 
     <el-dialog v-model="helpVisible" title="错误排查与诊断" width="min(600px, 92vw)" class="support-dialog">
       <section v-if="latestIssue" class="issue-notice" role="alert">
@@ -116,12 +134,59 @@
       <template #footer><el-button type="primary" @click="exportDiagnostics">导出匿名诊断信息</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="aboutVisible" title="关于课程视频自动播放" width="min(520px, 92vw)" class="support-dialog">
-      <p>版本 {{ version }}</p><h3>当前版本更新内容</h3>
-      <ul class="release-notes"><li v-for="change in appInfo.changes" :key="change">{{ change }}</li></ul>
-      <p class="support-intro">本地课程管理与播放客户端。退出应用会结束本地后端，任务也会停止。</p>
-      <el-button @click="openProject">打开项目仓库</el-button>
-      <p class="project-link">{{ appInfo.projectUrl }}（私有仓库需访问权限）</p>
+    <el-dialog v-model="aboutVisible" title="关于与更新" width="min(560px, 92vw)" class="support-dialog about-dialog">
+      <div class="about-tabs" role="tablist" aria-label="关于与更新">
+        <button id="about-tab" type="button" role="tab" :aria-selected="aboutTab === 'about'" aria-controls="about-panel" @click="aboutTab = 'about'">关于</button>
+        <button id="updates-tab" type="button" role="tab" :aria-selected="aboutTab === 'updates'" aria-controls="updates-panel" @click="aboutTab = 'updates'">更新内容</button>
+        <button id="terms-tab" type="button" role="tab" :aria-selected="aboutTab === 'terms'" aria-controls="terms-panel" @click="aboutTab = 'terms'">协议与免责声明</button>
+      </div>
+      <section v-if="aboutTab === 'about'" id="about-panel" role="tabpanel" aria-labelledby="about-tab" class="about-content">
+        <div class="about-heading"><span class="about-mark"><el-icon :size="24"><School /></el-icon></span><div><span class="about-eyebrow">课程工作台</span><h3>课程视频自动播放</h3></div></div>
+        <p class="about-description">本地课程管理与播放客户端。退出应用会结束本地后端，任务也会停止。</p>
+        <div class="about-meta">
+          <div><span>作者</span><strong>uu</strong></div>
+          <div><span>QQ</span><strong>2244422977</strong></div>
+          <div><span>当前版本</span><strong>{{ version }}</strong></div>
+          <div><span>开源许可证</span><strong>GPL-3.0-only</strong></div>
+        </div>
+        <el-button class="project-button" @click="openProject">打开项目仓库</el-button>
+      </section>
+      <section v-else-if="aboutTab === 'updates'" id="updates-panel" role="tabpanel" aria-labelledby="updates-tab" class="updates-content">
+        <div class="update-panel-heading">
+          <div><span class="about-eyebrow">当前版本 {{ version }}</span><h3>软件更新</h3></div>
+          <el-button :loading="updateStatus.status === 'checking'" :disabled="['checking', 'downloading', 'downloaded', 'installing'].includes(updateStatus.status)" @click="checkForUpdates">检查更新</el-button>
+        </div>
+        <div class="update-state" :data-state="updateStatus.status" role="status" aria-live="polite">
+          <span class="update-state-dot" aria-hidden="true"></span>
+          <p>{{ updateStatus.message }}</p>
+        </div>
+        <el-progress v-if="updateStatus.status === 'downloading'" :percentage="updateStatus.percent" :stroke-width="7" />
+        <div class="update-actions">
+          <el-button v-if="updateStatus.status === 'available'" type="primary" @click="downloadUpdate">下载 {{ updateStatus.version }} 更新</el-button>
+          <el-button v-else-if="updateStatus.status === 'downloaded'" type="primary" @click="installUpdate">重启并安装</el-button>
+        </div>
+        <p class="update-footnote">更新包通过 download.meetuu.top 安全连接获取。安装更新时应用会退出并重启。</p>
+        <h4 class="release-notes-heading">当前版本内容</h4>
+        <ul class="release-notes"><li v-for="change in appInfo.changes" :key="change">{{ change }}</li></ul>
+      </section>
+      <section v-else id="terms-panel" role="tabpanel" aria-labelledby="terms-tab" class="agreement-scroll">
+        <article class="agreement-section">
+          <span class="about-eyebrow">使用前请阅读</span><h3>用户协议</h3>
+          <p>本应用是供个人学习和课程管理使用的本地客户端，不提供课程内容或学习平台账号。</p>
+          <h4>使用范围</h4>
+          <p>请仅使用本人拥有或获准使用的账号，并遵守学习平台规则、学校要求及适用法律。不得冒用他人身份、绕过访问控制或干扰平台正常运行。</p>
+          <h4>账号与设备</h4>
+          <p>登录信息会发送到你填写的学习平台地址以完成登录。选择记住密码时，应用会通过本机的安全存储保存凭据。请妥善保管设备和账号，不要在公用设备上保存密码。</p>
+          <h4>观看任务</h4>
+          <p>开始任务前请核对账号、课程和观看设置，并留意任务状态。退出应用会停止本地后端，正在执行的任务也会结束。</p>
+          <h4>协议确认</h4>
+          <p>使用前请阅读本协议与下方免责声明。若不同意其中所述的使用范围，请勿使用本应用。</p>
+        </article>
+        <article class="agreement-section">
+          <span class="about-eyebrow">使用边界</span><h3>免责声明</h3>
+          <DisclaimerContent />
+        </article>
+      </section>
     </el-dialog>
 
     <el-dialog :model-value="Boolean(captchaFailures.length)" title="验证码识别错误" width="420px" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
@@ -168,11 +233,26 @@
       </label>
     </footer>
   </div>
+  <el-dialog :model-value="Boolean(closeConfirmation)" :title="closeConfirmation?.title" width="min(480px, 92vw)" :close-on-click-modal="false" :close-on-press-escape="false" :before-close="cancelCloseConfirmation" class="support-dialog close-confirm-dialog">
+    <div v-if="closeConfirmation" class="close-confirm-content">
+      <span class="close-confirm-icon" :class="`is-${closeConfirmation.kind}`" aria-hidden="true"><el-icon><InfoFilled /></el-icon></span>
+      <div class="close-confirm-copy">
+        <p class="close-confirm-message">{{ closeConfirmation.message }}</p>
+        <p v-if="closeConfirmation.accounts?.length" class="close-confirm-accounts">影响账号：{{ closeConfirmation.accounts.join('、') }}</p>
+        <p class="support-intro">{{ closeConfirmation.detail }}</p>
+      </div>
+    </div>
+    <el-checkbox v-if="closeConfirmation?.kind === 'idle'" v-model="rememberCloseChoice" class="remember-close-choice">记住我的选择</el-checkbox>
+    <template #footer>
+      <el-button v-if="closeConfirmation?.kind !== 'error'" @click="cancelCloseConfirmation">{{ closeConfirmation?.kind === 'running' ? '取消，继续运行' : '取消' }}</el-button>
+      <el-button :type="closeConfirmation?.kind === 'error' ? 'primary' : 'danger'" @click="confirmCloseApplication">{{ closeConfirmation?.closeLabel || '关闭软件' }}</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { School, VideoPlay } from '@element-plus/icons-vue'
+import { InfoFilled, School, VideoPlay } from '@element-plus/icons-vue'
 import AccountPool from './components/AccountPool.vue'
 import LoginPanel from './components/LoginPanel.vue'
 import CoursePanel from './components/CoursePanel.vue'
@@ -181,6 +261,7 @@ import PlaybackProgress from './components/PlaybackProgress.vue'
 import LogPanel from './components/LogPanel.vue'
 import WatchSettings from './components/WatchSettings.vue'
 import TaskSummary from './components/TaskSummary.vue'
+import DisclaimerContent from './components/DisclaimerContent.vue'
 import { accountRunning, createDiagnostics, errorAdvice } from './utils/support.mjs'
 import { appInfo } from './utils/appInfo.mjs'
 import { defaultWatchSettings, normalizeWatchSettings } from './utils/watchSettings.mjs'
@@ -221,7 +302,9 @@ const captchaFailures = ref([])
 const captchaRetrying = ref(false)
 const captchaRetryError = ref('')
 const aboutVisible = ref(false)
+const aboutTab = ref('about')
 const version = ref(appInfo.version)
+const updateStatus = ref({ status: 'idle', message: '点击“检查更新”获取最新版本信息。', version: '', percent: 0 })
 const helpVisible = ref(false)
 const summaryVisible = ref(false)
 const taskSummaries = ref([])
@@ -229,7 +312,42 @@ const summaryRetrying = ref('')
 const latestIssue = ref(null)
 const diagnosticMessage = ref('')
 const pendingConfirmation = ref(null)
+const closeConfirmation = ref(null)
+const rememberCloseChoice = ref(false)
+const DISCLAIMER_ACCEPTED_KEY = 'course-player-disclaimer-accepted-v1'
+const disclaimerAccepted = ref(readDisclaimerAcceptance())
+const disclaimerRemaining = ref(5)
+const disclaimerError = ref('')
+let disclaimerTimer = null
+let removeCloseConfirmationListener = null
+let removeUpdateStatusListener = null
+let applicationInitialized = false
 let confirmationResolve = null
+
+function readDisclaimerAcceptance() {
+  try { return localStorage.getItem(DISCLAIMER_ACCEPTED_KEY) === 'accepted' } catch { return false }
+}
+
+function acceptDisclaimer() {
+  if (disclaimerRemaining.value > 0) return
+  try {
+    localStorage.setItem(DISCLAIMER_ACCEPTED_KEY, 'accepted')
+  } catch {
+    disclaimerError.value = '无法保存同意状态，请检查本机存储权限后重试。'
+    return
+  }
+  disclaimerAccepted.value = true
+  disclaimerError.value = ''
+  void initializeApplication()
+}
+
+function declineDisclaimer() {
+  if (window.desktopAPI?.exitApplication) {
+    window.desktopAPI.exitApplication()
+    return
+  }
+  disclaimerError.value = '当前是网页预览，无法由页面关闭应用窗口；请关闭此预览退出。'
+}
 
 function confirmOperation(details) {
   if (pendingConfirmation.value) return Promise.resolve(false)
@@ -305,8 +423,62 @@ async function openProject() {
   } catch { addLog('无法打开项目链接，请复制仓库地址到浏览器', 'warn') }
 }
 
+async function checkForUpdates() {
+  if (!window.desktopAPI?.checkForUpdates) {
+    updateStatus.value = { status: 'unavailable', message: '当前预览环境无法检查更新。', version: '', percent: 0 }
+    return
+  }
+  updateStatus.value = { status: 'checking', message: '正在检查更新…', version: '', percent: 0 }
+  try {
+    updateStatus.value = { ...updateStatus.value, ...await window.desktopAPI.checkForUpdates() }
+  } catch {
+    updateStatus.value = { status: 'error', message: '暂时无法检查更新，请稍后重试。', version: '', percent: 0 }
+  }
+}
+
+async function downloadUpdate() {
+  updateStatus.value = { ...updateStatus.value, status: 'downloading', percent: 0, message: '正在准备下载…' }
+  try {
+    const result = await window.desktopAPI?.downloadUpdate?.()
+    if (result?.status === 'error') updateStatus.value = result
+  } catch {
+    updateStatus.value = { status: 'error', message: '更新下载失败，请检查网络后重试。', version: '', percent: 0 }
+  }
+}
+
+async function installUpdate() {
+  const runningCount = accounts.value.filter(accountRunning).length
+  const confirmed = await confirmOperation({
+    title: '准备安装更新',
+    message: '应用将退出并重启以完成安装。',
+    scope: [`当前版本：${version.value}`, `新版本：${updateStatus.value.version || '更新版本'}`],
+    detail: runningCount ? `当前有 ${runningCount} 个账号任务运行中。重启会结束这些任务，未确认的进度可能丢失。` : '本地任务会随应用退出而停止。',
+    button: '重启并安装更新',
+    buttonType: 'primary'
+  })
+  if (!confirmed) return
+  updateStatus.value = { ...updateStatus.value, status: 'installing', message: '正在重启并安装更新…' }
+  await window.desktopAPI?.installUpdate?.()
+}
+
 function minimizeWindow() { window.desktopAPI?.minimizeWindow?.() }
 function closeWindow() { window.desktopAPI?.closeWindow?.() }
+
+function cancelCloseConfirmation() {
+  if (!closeConfirmation.value) return
+  closeConfirmation.value = null
+  window.desktopAPI?.respondToClose?.({ close: false, remember: false })
+}
+function confirmCloseApplication() {
+  const confirmation = closeConfirmation.value
+  if (!confirmation) return
+  closeConfirmation.value = null
+  window.desktopAPI?.respondToClose?.({
+    close: confirmation.kind !== 'error',
+    remember: confirmation.kind === 'idle' && rememberCloseChoice.value
+  })
+  rememberCloseChoice.value = false
+}
 
 try {
   const saved = JSON.parse(localStorage.getItem('watch-settings') || '{}')
@@ -573,6 +745,16 @@ async function refreshAccounts() {
 }
 
 async function handleLogin(payload) {
+  const confirmed = await confirmOperation({
+    title: '确认登录吗',
+    message: '即将使用以下平台地址登录并添加账号：',
+    scope: [payload.platformUrl],
+    detail: '最好不要在同一台设备上同时登录学习网站和播放器。若要查看网页，请先结束观看后再进入。',
+    button: '确认登录',
+    buttonType: 'primary'
+  })
+  if (!confirmed) return
+
   loginLoading.value = true
   try {
     const result = await loginAccount(payload.username, payload.password, '', payload.profileId, payload.platformUrl)
@@ -712,7 +894,9 @@ async function handleStopAll() {
   }
 }
 
-onMounted(async () => {
+async function initializeApplication() {
+  if (applicationInitialized) return
+  applicationInitialized = true
   if (window.desktopAPI?.getVersion) version.value = await window.desktopAPI.getVersion()
   await initApiBase()
   connectEvents()
@@ -723,9 +907,33 @@ onMounted(async () => {
   }
 
   await refreshAccounts()
+}
+
+onMounted(() => {
+  removeUpdateStatusListener = window.desktopAPI?.onUpdateStatus?.(status => {
+    updateStatus.value = { ...updateStatus.value, ...status }
+  }) || null
+  removeCloseConfirmationListener = window.desktopAPI?.onCloseConfirmation?.(details => {
+    closeConfirmation.value = details
+    rememberCloseChoice.value = false
+  }) || null
+  if (disclaimerAccepted.value) {
+    void initializeApplication()
+    return
+  }
+  disclaimerTimer = window.setInterval(() => {
+    disclaimerRemaining.value = Math.max(0, disclaimerRemaining.value - 1)
+    if (!disclaimerRemaining.value) {
+      window.clearInterval(disclaimerTimer)
+      disclaimerTimer = null
+    }
+  }, 1000)
 })
 
 onBeforeUnmount(() => {
+  removeCloseConfirmationListener?.()
+  removeUpdateStatusListener?.()
+  if (disclaimerTimer) window.clearInterval(disclaimerTimer)
   cancelConfirmation()
   window.clearTimeout(reconnectTimer)
   socketGeneration += 1

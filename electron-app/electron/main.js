@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain, safeStorage, shell } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
@@ -16,6 +17,22 @@ let closeRequestPending = false
 
 let backendPort = 8765
 const backendToken = randomBytes(32).toString('hex')
+
+autoUpdater.autoDownload = false
+autoUpdater.autoInstallOnAppQuit = false
+
+function sendUpdateStatus(status) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updates:status', status)
+  }
+}
+
+autoUpdater.on('checking-for-update', () => sendUpdateStatus({ status: 'checking', message: '正在检查更新…' }))
+autoUpdater.on('update-available', info => sendUpdateStatus({ status: 'available', version: info.version, message: `发现新版本 ${info.version}` }))
+autoUpdater.on('update-not-available', info => sendUpdateStatus({ status: 'current', version: info.version, message: '当前已是最新版本。' }))
+autoUpdater.on('download-progress', progress => sendUpdateStatus({ status: 'downloading', percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))), message: '正在下载更新…' }))
+autoUpdater.on('update-downloaded', info => sendUpdateStatus({ status: 'downloaded', version: info.version, percent: 100, message: `版本 ${info.version} 已下载，可以重启安装。` }))
+autoUpdater.on('error', () => sendUpdateStatus({ status: 'error', message: '暂时无法检查或下载更新，请确认网络连接后重试。' }))
 
 app.setName('课程视频自动播放')
 if (process.platform === 'win32') {
@@ -93,17 +110,15 @@ async function handleCloseRequest() {
   try {
     const runningAccounts = await hasRunningWatchTasks()
     if (runningAccounts.length) {
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: 'warning',
+      const decision = await requestCloseDecision({
+        kind: 'running',
         title: '观看任务正在运行',
         message: `仍有 ${runningAccounts.length} 个账号的任务正在运行，确定停止任务并退出吗？`,
-        detail: `影响账号：\n${runningAccounts.map(account => account.label || account.user?.name || account.username || '未命名账号').join('\n')}\n\n退出会结束本地后端，所有本地任务也会停止。未完成章节将中断，未确认的进度可能丢失；下次启动需重新登录并读取课程。取消可继续运行，最小化也可保留任务。`,
-        buttons: ['取消，继续运行', '停止全部任务并退出'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
+        accounts: runningAccounts.map(account => account.label || account.user?.name || account.username || '未命名账号'),
+        detail: '退出会结束本地后端，所有本地任务也会停止。未完成章节将中断，未确认的进度可能丢失；下次启动需重新登录并读取课程。取消可继续运行，最小化也可保留任务。',
+        closeLabel: '停止全部任务并退出'
       })
-      if (result.response === 1) {
+      if (decision.close) {
         quitAllowed = true
         app.quit()
       }
@@ -113,20 +128,15 @@ async function handleCloseRequest() {
     const preferences = loadPreferences()
     let shouldClose = preferences.rememberedCloseChoice
     if (typeof shouldClose !== 'boolean') {
-      const result = await dialog.showMessageBox(mainWindow, {
-        type: 'question',
+      const decision = await requestCloseDecision({
+        kind: 'idle',
         title: '关闭软件',
         message: '当前没有观看任务，确定要直接关闭软件吗？',
         detail: '关闭会结束本地后端。下次使用需要重新登录账号并读取课程。',
-        checkboxLabel: '记住我的选择',
-        checkboxChecked: false,
-        buttons: ['取消', '关闭软件'],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
+        closeLabel: '关闭软件'
       })
-      shouldClose = result.response === 1
-      if (result.checkboxChecked) {
+      shouldClose = decision.close
+      if (decision.remember) {
         savePreferences({ ...preferences, rememberedCloseChoice: shouldClose })
       }
     }
@@ -135,16 +145,32 @@ async function handleCloseRequest() {
       app.quit()
     }
   } catch (error) {
-    await dialog.showMessageBox(mainWindow, {
-      type: 'error',
+    await requestCloseDecision({
+      kind: 'error',
       title: '无法确认观看任务状态',
       message: '暂时不能关闭软件，因为无法确认观看任务是否已经停止。',
       detail: error.message,
-      buttons: ['知道了']
+      closeLabel: '知道了'
     })
   } finally {
     closeRequestPending = false
   }
+}
+
+function requestCloseDecision(details) {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve({ close: false, remember: false })
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  return new Promise(resolve => {
+    const onDecision = (_event, decision) => {
+      try { requireTrustedRenderer(_event) } catch { return }
+      ipcMain.removeListener('app:close-decision', onDecision)
+      resolve({ close: Boolean(decision?.close), remember: Boolean(decision?.remember) })
+    }
+    ipcMain.once('app:close-decision', onDecision)
+    mainWindow.webContents.send('app:close-confirmation', details)
+  })
 }
 
 function getCredentialPath() {
@@ -288,6 +314,35 @@ ipcMain.handle('app:get-version', event => {
   requireTrustedRenderer(event)
   return app.getVersion()
 })
+ipcMain.handle('updates:check', async event => {
+  requireTrustedRenderer(event)
+  if (!app.isPackaged) return { status: 'unavailable', message: '开发预览版不能检查更新，请在已安装版本中操作。' }
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    if (!result) return { status: 'unavailable', message: '当前无法连接更新服务，请稍后重试。' }
+    if (!result.isUpdateAvailable) return { status: 'current', version: result.updateInfo?.version, message: '当前已是最新版本。' }
+    return { status: 'available', version: result.updateInfo?.version, message: `发现新版本 ${result.updateInfo?.version || ''}` }
+  } catch {
+    return { status: 'error', message: '暂时无法检查更新，请确认网络连接后重试。' }
+  }
+})
+ipcMain.handle('updates:download', async event => {
+  requireTrustedRenderer(event)
+  if (!app.isPackaged) return { status: 'unavailable', message: '开发预览版不能下载更新。' }
+  try {
+    await autoUpdater.downloadUpdate()
+    return { status: 'downloaded', message: '更新已下载。' }
+  } catch {
+    return { status: 'error', message: '更新下载失败，请检查网络后重试。' }
+  }
+})
+ipcMain.handle('updates:install', event => {
+  requireTrustedRenderer(event)
+  if (!app.isPackaged) return { status: 'unavailable' }
+  quitAllowed = true
+  autoUpdater.quitAndInstall()
+  return { status: 'installing' }
+})
 ipcMain.handle('diagnostics:save', async (event, payload) => {
   requireTrustedRenderer(event)
   const data = filterDiagnostics(payload)
@@ -315,6 +370,11 @@ ipcMain.on('window:minimize', event => {
 ipcMain.on('window:close', event => {
   requireTrustedRenderer(event)
   mainWindow.close()
+})
+ipcMain.on('app:decline-disclaimer', event => {
+  requireTrustedRenderer(event)
+  quitAllowed = true
+  app.quit()
 })
 
 ipcMain.handle('credentials:load', event => {

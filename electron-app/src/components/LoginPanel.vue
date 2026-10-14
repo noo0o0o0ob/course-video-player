@@ -14,12 +14,14 @@
 
     <el-form label-position="top" class="form-stack" @submit.prevent="submit">
       <div class="login-fields">
-      <el-form-item label="学习平台地址" required>
+      <el-form-item label="学习平台地址" required :error="platformUrlError">
         <el-input
           v-model.trim="platformUrl"
-          placeholder="https://你的学习平台"
+          placeholder="粘贴平台网址，例如 example.com/user/login"
           clearable
+          @input="platformUrlError = ''"
         />
+        <small class="platform-url-hint">支持填写域名或登录页地址，提交时会自动整理成平台基础地址。</small>
       </el-form-item>
 
       <el-form-item label="学号">
@@ -76,6 +78,7 @@
 import { onMounted, ref } from 'vue'
 import { Delete, Key } from '@element-plus/icons-vue'
 import { getProfiles } from '../api/client'
+import { normalizePlatformUrl } from '../utils/platformUrl.mjs'
 
 const props = defineProps({
   loading: { type: Boolean, default: false },
@@ -85,6 +88,7 @@ const props = defineProps({
 const emit = defineEmits(['login', 'save-credentials', 'clear-credentials'])
 
 const platformUrl = ref('')
+const platformUrlError = ref('')
 const username = ref('')
 const password = ref('')
 const remember = ref(true)
@@ -93,8 +97,15 @@ const selectedProfileId = ref('')
 
 function submit() {
   if (props.loading || !platformUrl.value || !username.value || !password.value) return
+  try {
+    platformUrl.value = normalizePlatformUrl(platformUrl.value)
+    platformUrlError.value = ''
+  } catch (error) {
+    platformUrlError.value = error.message
+    return
+  }
   emit('login', {
-    platformUrl: platformUrl.value || null,
+    platformUrl: platformUrl.value,
     username: username.value,
     password: password.value,
     remember: remember.value,
