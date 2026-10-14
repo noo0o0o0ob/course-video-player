@@ -1,0 +1,42 @@
+name: 更新 Star 历史与贡献者图
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  watch:
+    types: [started]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-visuals
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 生成 Star 历史图和贡献者头像墙
+        uses: overtrue/repo-visuals-action@ee2c632f6ce617e851fb46ea935ee8af762ebb93 # v1.4.0
+        with:
+          github-token: ${{ github.token }}
+          output-branch: star-history
+          output-path: assets/repository-visuals
+          chart-title: Star 增长
+          chart-style: gradient
+          chart-variant: area
+          chart-layout: editorial
+          background-color: '#f3f7f6'
+          background-color-dark: '#111a19'
+          accent-color: '#278a68'
+          accent-color-dark: '#55c799'
+          animate: 'true'
+          contributors: 'true'
+          contributors-title: 项目贡献者
+          contributors-columns: '8'
+          avatar-size: '56'
+          avatar-gap: '12'
+          avatar-shape: squircle
+          padding: '28'
