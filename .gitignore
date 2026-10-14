@@ -50,6 +50,7 @@ pnpm-debug.log*
 # Local coding assistant metadata
 .agents/
 .codegraph/
+.impeccable/
 
 # Local credentials, sessions, and exported data
 credentials.json
