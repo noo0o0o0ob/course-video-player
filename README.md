@@ -21,7 +21,7 @@
 <br>
 
 <p align="center">
-  <img src="download-site/preview.png" alt="课程工作台实际运行界面" width="920">
+  <img src="https://download.meetuu.top/preview.png" alt="课程工作台实际运行界面" width="920">
 </p>
 
 ## 一个工作台，掌握当前进度

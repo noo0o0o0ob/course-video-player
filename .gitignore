@@ -51,6 +51,12 @@ pnpm-debug.log*
 .agents/
 .codegraph/
 .impeccable/
+/AGENTS.md
+/DESIGN.md
+/PRODUCT.md
+/RELEASE.md
+/download-site/
+/docs/superpowers/
 
 # Local credentials, sessions, and exported data
 credentials.json
