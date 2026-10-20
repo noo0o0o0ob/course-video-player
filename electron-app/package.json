@@ -1,6 +1,6 @@
 {
   "name": "course-video-player",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "GPL-3.0-only",
   "private": true,
   "description": "课程管理与观看进度客户端",

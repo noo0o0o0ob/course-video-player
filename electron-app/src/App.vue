@@ -533,6 +533,10 @@ async function downloadUpdate() {
 }
 
 async function installUpdate() {
+  if (updateStatus.value.forced) {
+    await window.desktopAPI?.installUpdate?.()
+    return
+  }
   const runningCount = accounts.value.filter(accountRunning).length
   const confirmed = await confirmOperation({
     title: '准备安装更新',

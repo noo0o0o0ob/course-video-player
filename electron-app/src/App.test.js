@@ -8,6 +8,7 @@ import LoginPanel from './components/LoginPanel.vue'
 import PlaybackControls from './components/PlaybackControls.vue'
 import PlaybackProgress from './components/PlaybackProgress.vue'
 import LogPanel from './components/LogPanel.vue'
+import UpdateNotice from './components/UpdateNotice.vue'
 import * as api from './api/client'
 import { defaultWatchSettings } from './utils/watchSettings.mjs'
 
@@ -30,6 +31,7 @@ vi.mock('./api/client', () => ({
 describe('平铺课程工作台', () => {
   let wrapper
   let accountState
+  let updateListener
   async function confirmPending() {
     await flushPromises()
     const button = wrapper.findAll('.el-dialog button').find(button => /确认登录|确认全部开始|确认全部停止|移除该账号/.test(button.text()))
@@ -57,6 +59,10 @@ describe('平铺课程工作台', () => {
     api.startAllAccountPlay.mockImplementation(api.startAccountPlay.getMockImplementation())
     api.stopAllAccountPlay.mockImplementation(api.stopAccountPlay.getMockImplementation())
     window.desktopAPI = {
+      checkForUpdates: vi.fn(async () => ({ status: 'current', version: '0.1.0', forced: false })),
+      onUpdateStatus: vi.fn(callback => { updateListener = callback; return () => {} }),
+      downloadUpdate: vi.fn(async () => ({ status: 'downloaded', version: '0.3.0', forced: true })),
+      installUpdate: vi.fn(async () => ({ status: 'installing' })),
       getVersion: vi.fn(async () => '0.1.0'),
       getUsageChart: vi.fn(async () => ({ total: 0, days: [] })),
       onCloseConfirmation: vi.fn(() => () => {}),
@@ -590,6 +596,27 @@ describe('平铺课程工作台', () => {
     await wrapper.get('#updates-tab').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('当前版本内容')
+  })
+
+  test('启动自动检查一次，强制更新下载完成后自动安装', async () => {
+    await flushPromises()
+    expect(window.desktopAPI.checkForUpdates).toHaveBeenCalledOnce()
+    updateListener({ status: 'available', version: '0.3.0', forced: true })
+    await flushPromises()
+    wrapper.findComponent(UpdateNotice).vm.$emit('download')
+    await flushPromises()
+    expect(window.desktopAPI.downloadUpdate).toHaveBeenCalledOnce()
+    expect(window.desktopAPI.installUpdate).toHaveBeenCalledOnce()
+  })
+
+  test('强制更新安装重试直接执行，不创建被强制弹窗遮挡的确认框', async () => {
+    await flushPromises()
+    updateListener({ status: 'downloaded', version: '0.3.0', forced: true })
+    await flushPromises()
+    wrapper.findComponent(UpdateNotice).vm.$emit('install')
+    await flushPromises()
+    expect(window.desktopAPI.installUpdate).toHaveBeenCalledOnce()
+    expect(wrapper.text()).not.toContain('准备安装更新')
   })
 
   test.each([false, true])('批量启动失败进入总结，刷新时不会被后端的旧结果覆盖（HTTP 错误：%s）', async (httpError) => {

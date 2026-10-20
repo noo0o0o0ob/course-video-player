@@ -56,11 +56,15 @@ function createUpdateService({ updater, currentVersion, publish }) {
       })()
       return downloading
     },
-    install(beforeQuit) {
+    async install(beforeQuit) {
       if (state.status !== 'downloaded') return state
       send({ status: 'installing', message: '正在安装更新并重启…' })
-      beforeQuit()
-      updater.quitAndInstall(true, true)
+      try {
+        await beforeQuit()
+        updater.quitAndInstall(true, true)
+      } catch {
+        send({ status: 'downloaded', message: '暂时无法停止本地任务，请稍后重试安装。' })
+      }
       return state
     }
   }

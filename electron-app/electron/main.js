@@ -278,6 +278,23 @@ function stopBackend() {
   }
 }
 
+async function stopBackendForUpdate() {
+  const child = backendProcess
+  if (!child) return
+  // 安装前等待整棵进程树退出，避免应用先退出导致清理命令来不及完成。
+  await new Promise((resolve, reject) => {
+    const killer = spawn('taskkill', ['/pid', child.pid.toString(), '/f', '/t'], { windowsHide: true })
+    const timer = setTimeout(() => { killer.kill(); reject(new Error('停止后端超时')) }, 10000)
+    killer.once('error', error => { clearTimeout(timer); reject(error) })
+    killer.once('exit', code => {
+      clearTimeout(timer)
+      if (code === 0) resolve()
+      else reject(new Error('后端尚未完全退出'))
+    })
+  })
+  backendProcess = null
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null)
   mainWindow = new BrowserWindow({
@@ -412,7 +429,7 @@ ipcMain.handle('updates:download', async event => {
 ipcMain.handle('updates:install', event => {
   requireTrustedRenderer(event)
   if (!app.isPackaged) return { status: 'unavailable' }
-  return updates.install(() => { quitAllowed = true })
+  return updates.install(async () => { await stopBackendForUpdate(); quitAllowed = true })
 })
 ipcMain.handle('updates:open-release', event => {
   requireTrustedRenderer(event)
