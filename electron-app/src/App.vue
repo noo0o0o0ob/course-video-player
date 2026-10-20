@@ -192,7 +192,7 @@
           <el-button v-if="updateStatus.status === 'available'" type="primary" @click="downloadUpdate">下载 {{ updateStatus.version }} 更新</el-button>
           <el-button v-else-if="updateStatus.status === 'downloaded'" type="primary" @click="installUpdate">重启并安装</el-button>
         </div>
-        <p class="update-footnote">更新包通过 download.meetuu.top 安全连接获取。安装更新时应用会退出并重启。</p>
+        <p class="update-footnote">更新包由 GitHub Releases 提供，优先下载差分数据；安装时应用会退出并重启。</p>
         <h4 class="release-notes-heading">当前版本内容</h4>
         <ul class="release-notes"><li v-for="change in appInfo.changes" :key="change">{{ change }}</li></ul>
       </section>
@@ -262,6 +262,7 @@
       </label>
     </footer>
   </div>
+  <UpdateNotice :status="updateStatus" @download="downloadUpdate" @check="checkForUpdates" @install="installUpdate" />
   <el-dialog :model-value="Boolean(closeConfirmation)" :title="closeConfirmation?.title" width="min(480px, 92vw)" :close-on-click-modal="false" :close-on-press-escape="false" :before-close="cancelCloseConfirmation" class="support-dialog close-confirm-dialog">
     <div v-if="closeConfirmation" class="close-confirm-content">
       <span class="close-confirm-icon" :class="`is-${closeConfirmation.kind}`" aria-hidden="true"><el-icon><InfoFilled /></el-icon></span>
@@ -282,6 +283,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { InfoFilled, School, VideoPlay } from '@element-plus/icons-vue'
+import UpdateNotice from './components/UpdateNotice.vue'
 import AccountPool from './components/AccountPool.vue'
 import LoginPanel from './components/LoginPanel.vue'
 import CoursePanel from './components/CoursePanel.vue'
@@ -511,11 +513,11 @@ async function checkForUpdates() {
     updateStatus.value = { status: 'unavailable', message: '当前预览环境无法检查更新。', version: '', percent: 0 }
     return
   }
-  updateStatus.value = { status: 'checking', message: '正在检查更新…', version: '', percent: 0 }
+  updateStatus.value = { ...updateStatus.value, status: 'checking', message: '正在检查更新…', percent: 0 }
   try {
     updateStatus.value = { ...updateStatus.value, ...await window.desktopAPI.checkForUpdates() }
   } catch {
-    updateStatus.value = { status: 'error', message: '暂时无法检查更新，请稍后重试。', version: '', percent: 0 }
+    updateStatus.value = { ...updateStatus.value, status: 'error', message: '暂时无法检查更新，请稍后重试。' }
   }
 }
 
@@ -523,9 +525,10 @@ async function downloadUpdate() {
   updateStatus.value = { ...updateStatus.value, status: 'downloading', percent: 0, message: '正在准备下载…' }
   try {
     const result = await window.desktopAPI?.downloadUpdate?.()
-    if (result?.status === 'error') updateStatus.value = result
+    if (result) updateStatus.value = { ...updateStatus.value, ...result }
+    if (result?.status === 'downloaded' && updateStatus.value.forced) await window.desktopAPI?.installUpdate?.()
   } catch {
-    updateStatus.value = { status: 'error', message: '更新下载失败，请检查网络后重试。', version: '', percent: 0 }
+    updateStatus.value = { ...updateStatus.value, status: 'error', message: '更新下载失败，请检查网络后重试。' }
   }
 }
 
@@ -1070,6 +1073,7 @@ async function initializeApplication() {
 }
 
 onMounted(() => {
+  void checkForUpdates()
   removeUpdateStatusListener = window.desktopAPI?.onUpdateStatus?.(status => {
     updateStatus.value = { ...updateStatus.value, ...status }
   }) || null

@@ -1,6 +1,6 @@
 {
   "name": "course-video-player",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "GPL-3.0-only",
   "private": true,
   "description": "课程管理与观看进度客户端",
@@ -13,12 +13,8 @@
     "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
-    "@element-plus/icons-vue": "^2.3.2",
-    "@vitejs/plugin-vue": "^5.2.4",
     "electron-updater": "^6.8.9",
-    "element-plus": "^2.14.2",
-    "lucide-vue-next": "^0.468.0",
-    "vue": "^3.5.13"
+    "semver": "^7.7.3"
   },
   "devDependencies": {
     "@vue/test-utils": "^2.4.11",
@@ -29,16 +25,23 @@
     "jsdom": "^29.1.1",
     "vite": "^5.4.11",
     "vitest": "^4.1.8",
-    "wait-on": "^8.0.1"
+    "wait-on": "^8.0.1",
+    "@element-plus/icons-vue": "^2.3.2",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "element-plus": "^2.14.2",
+    "lucide-vue-next": "^0.468.0",
+    "vue": "^3.5.13"
   },
   "build": {
     "appId": "com.cqcst.course-video-player",
     "productName": "课程视频自动播放",
-    "artifactName": "${productName}-安装程序-${version}.${ext}",
+    "artifactName": "course-video-player-setup-${version}.${ext}",
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://download.meetuu.top/updates/"
+        "provider": "github",
+        "owner": "noo0o0o0ob",
+        "repo": "course-video-player",
+        "releaseType": "release"
       }
     ],
     "directories": {
@@ -48,7 +51,8 @@
       "dist/**/*",
       "electron/**/*",
       "public/**/*",
-      "package.json"
+      "package.json",
+      "!electron/*.node.cjs"
     ],
     "extraResources": [
       {
@@ -75,7 +79,8 @@
       "installerLanguages": [
         "zh_CN"
       ],
-      "displayLanguageSelector": false
+      "displayLanguageSelector": false,
+      "differentialPackage": true
     }
   }
 }

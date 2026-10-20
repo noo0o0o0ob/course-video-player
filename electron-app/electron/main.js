@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain, safeStorage, shell } = require('electron')
 const { autoUpdater } = require('electron-updater')
+const { createUpdateService, releasesUrl } = require('./update-service.cjs')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
@@ -21,21 +22,13 @@ const usageApiBase = 'https://download.meetuu.top/api/usage/'
 let backendPort = 8765
 const backendToken = randomBytes(32).toString('hex')
 
-autoUpdater.autoDownload = false
-autoUpdater.autoInstallOnAppQuit = false
-
-function sendUpdateStatus(status) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('updates:status', status)
+const updates = createUpdateService({
+  updater: autoUpdater,
+  currentVersion: app.getVersion?.() || '0.0.0',
+  publish: status => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('updates:status', status)
   }
-}
-
-autoUpdater.on('checking-for-update', () => sendUpdateStatus({ status: 'checking', message: '正在检查更新…' }))
-autoUpdater.on('update-available', info => sendUpdateStatus({ status: 'available', version: info.version, message: `发现新版本 ${info.version}` }))
-autoUpdater.on('update-not-available', info => sendUpdateStatus({ status: 'current', version: info.version, message: '当前已是最新版本。' }))
-autoUpdater.on('download-progress', progress => sendUpdateStatus({ status: 'downloading', percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))), message: '正在下载更新…' }))
-autoUpdater.on('update-downloaded', info => sendUpdateStatus({ status: 'downloaded', version: info.version, percent: 100, message: `版本 ${info.version} 已下载，可以重启安装。` }))
-autoUpdater.on('error', () => sendUpdateStatus({ status: 'error', message: '暂时无法检查或下载更新，请确认网络连接后重试。' }))
+})
 
 app.setName('课程视频自动播放')
 if (process.platform === 'win32') {
@@ -409,31 +402,21 @@ ipcMain.handle('app:get-version', event => {
 ipcMain.handle('updates:check', async event => {
   requireTrustedRenderer(event)
   if (!app.isPackaged) return { status: 'unavailable', message: '开发预览版不能检查更新，请在已安装版本中操作。' }
-  try {
-    const result = await autoUpdater.checkForUpdates()
-    if (!result) return { status: 'unavailable', message: '当前无法连接更新服务，请稍后重试。' }
-    if (!result.isUpdateAvailable) return { status: 'current', version: result.updateInfo?.version, message: '当前已是最新版本。' }
-    return { status: 'available', version: result.updateInfo?.version, message: `发现新版本 ${result.updateInfo?.version || ''}` }
-  } catch {
-    return { status: 'error', message: '暂时无法检查更新，请确认网络连接后重试。' }
-  }
+  return updates.check()
 })
 ipcMain.handle('updates:download', async event => {
   requireTrustedRenderer(event)
   if (!app.isPackaged) return { status: 'unavailable', message: '开发预览版不能下载更新。' }
-  try {
-    await autoUpdater.downloadUpdate()
-    return { status: 'downloaded', message: '更新已下载。' }
-  } catch {
-    return { status: 'error', message: '更新下载失败，请检查网络后重试。' }
-  }
+  return updates.download()
 })
 ipcMain.handle('updates:install', event => {
   requireTrustedRenderer(event)
   if (!app.isPackaged) return { status: 'unavailable' }
-  quitAllowed = true
-  autoUpdater.quitAndInstall()
-  return { status: 'installing' }
+  return updates.install(() => { quitAllowed = true })
+})
+ipcMain.handle('updates:open-release', event => {
+  requireTrustedRenderer(event)
+  return shell.openExternal(releasesUrl)
 })
 ipcMain.handle('diagnostics:save', async (event, payload) => {
   requireTrustedRenderer(event)

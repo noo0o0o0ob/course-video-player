@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { EventEmitter } from 'node:events'
 import path from 'node:path'
 import diagnostics from '../electron/diagnostics.cjs'
+import updateService from '../electron/update-service.cjs'
 
 function desktopFixture({ accounts = [], choice = 0, remembered = true, canceled = false, backendError = false, hasWindow = true } = {}) {
   const dialogs = []
@@ -37,6 +38,7 @@ function desktopFixture({ accounts = [], choice = 0, remembered = true, canceled
       if (name === 'fs') return { mkdirSync() {}, readFileSync: () => JSON.stringify({ rememberedCloseChoice: remembered }), writeFileSync: (...args) => writes.push(args) }
       if (name === './backend-launcher.cjs') return {}
       if (name === './diagnostics.cjs') return diagnostics
+      if (name === './update-service.cjs') return updateService
       if (name === 'path') return path
       if (name === 'node:crypto') return { randomBytes: () => ({ toString: () => 'synthetic-local-token' }) }
       if (name === 'node:url') return { pathToFileURL() {} }

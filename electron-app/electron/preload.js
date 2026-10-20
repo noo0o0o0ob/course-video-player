@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   getVersion: () => ipcRenderer.invoke('app:get-version'),
   recordUsageLaunch: () => ipcRenderer.invoke('usage:record-launch'),
   getUsageChart: () => ipcRenderer.invoke('usage:get-chart'),
+  openReleasePage: () => ipcRenderer.invoke('updates:open-release'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   downloadUpdate: () => ipcRenderer.invoke('updates:download'),
   installUpdate: () => ipcRenderer.invoke('updates:install'),
