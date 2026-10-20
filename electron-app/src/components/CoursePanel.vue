@@ -61,7 +61,7 @@
           <strong :title="chapter.name">{{ chapter.name }}</strong>
           <small>
             <el-tag :type="stateType(chapter.study_state)" size="small" round>
-              {{ stateText(chapter.study_state) }}
+              {{ chapter.study_state === 2 ? '完成' : String(chapter.node_id) === watchingNodeId && chapter.study_state === 1 ? '观看中' : chapter.locked ? '未解锁' : stateText(chapter.study_state) }}
             </el-tag>
             <span>节点 {{ chapter.node_id }}</span>
           </small>
@@ -80,6 +80,7 @@ const props = defineProps({
   courses: { type: Array, default: () => [] },
   chapters: { type: Array, default: () => [] },
   selectedCourseId: { type: String, default: '' },
+  watchingNodeId: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   chapterLoading: { type: Boolean, default: false },
   chapterError: { type: String, default: '' },

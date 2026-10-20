@@ -53,6 +53,61 @@ class CoursePageParser(HTMLParser):
             self._anchor = None
 
 
+class ChapterPageParser(HTMLParser):
+    """按目录行关联标题、时长及图标链接，保留未解锁节点。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.chapters: list[dict[str, Any]] = []
+        self._depth = 0
+        self._row_depth = 0
+        self._title_depth = 0
+        self._title_anchor = False
+        self._row: dict[str, Any] | None = None
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attrs = dict(attrs)
+        classes = attrs.get("class", "").split()
+        if tag == "div":
+            self._depth += 1
+            if self._row is None and "item" in classes:
+                self._row_depth = self._depth
+                self._row = {"node_id": "", "name": "", "text": "", "locked": False, "is_video": False}
+            if self._row is not None and "tit" in classes:
+                self._title_depth = self._depth
+        if self._row is None:
+            return
+        if tag == "a":
+            self._title_anchor = bool(self._title_depth)
+            url = urlsplit(attrs.get("href") or "")
+            node_id = parse_qs(url.query).get("nodeId", [""])[0]
+            if url.path == "/user/node" and node_id.isdigit():
+                self._row["node_id"] = node_id
+            if attrs.get("title") == "视频":
+                self._row["is_video"] = True
+        if tag == "img" and "lock.png" in (attrs.get("src") or ""):
+            self._row["locked"] = True
+
+    def handle_data(self, data: str) -> None:
+        if self._row is not None:
+            self._row["text"] += data
+            if self._title_anchor:
+                self._row["name"] += data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a":
+            self._title_anchor = False
+        if tag != "div":
+            return
+        if self._row is not None and self._depth == self._row_depth:
+            if self._row["node_id"] and self._row["name"].strip():
+                self.chapters.append(self._row)
+            self._row = None
+        if self._depth == self._title_depth:
+            self._title_depth = 0
+        self._depth -= 1
+
+
 class AutoPlayer:
     def __init__(self, event_callback: EventCallback | None = None, profile: dict[str, Any] | None = None, platform_url: str | None = None) -> None:
         self._network_lock = threading.RLock()
@@ -508,44 +563,48 @@ class AutoPlayer:
             record_durations = {}
             self.log(f"视频记录时长读取失败，将使用节点页面时长: {safe_error_message(exc)}", level="warning")
 
+        parser = ChapterPageParser()
+        parser.feed(html)
         matches = list(re.finditer(r'href="/user/node\?nodeId=(\d+)"[^>]*>([^<]+)</a>', html))
         skip_names = {"继续学习", "开始学习", "学习中"}
-        node_names: dict[str, str] = {}
-
-        for match in matches:
-            node_id, name = match.groups()
-            clean_name = re.sub(r"\s+", " ", name).strip()
-            if not clean_name or "img" in clean_name.lower() or "ncoursecon" in clean_name:
-                continue
-            if clean_name not in skip_names:
-                node_names[node_id] = clean_name
+        candidates = parser.chapters
+        # 兼容没有 item/tit 目录结构的平台页面。
+        if not candidates:
+            candidates = []
+            for index, match in enumerate(matches):
+                node_id, name = match.groups()
+                next_start = matches[index + 1].start() if index + 1 < len(matches) else len(html)
+                candidates.append({"node_id": node_id, "name": name, "text": html[match.end():next_start], "locked": False})
 
         chapters: list[dict[str, Any]] = []
         seen_nodes: set[str] = set()
-        for index, match in enumerate(matches):
-            node_id, name = match.groups()
+        for candidate in candidates:
+            node_id, name = candidate["node_id"], candidate["name"]
             clean_name = re.sub(r"\s+", " ", name).strip()
-            if node_id in seen_nodes:
-                continue
             if not clean_name or "img" in clean_name.lower() or "ncoursecon" in clean_name:
+                continue
+            if node_id in seen_nodes:
                 continue
             if clean_name in skip_names:
                 continue
             seen_nodes.add(node_id)
-            next_start = matches[index + 1].start() if index + 1 < len(matches) else len(html)
-            nearby_html = html[match.end():next_start]
+            nearby_html = candidate["text"]
             duration = record_durations.get(node_id, 0) or self.parse_duration_from_text(nearby_html)
-            if not duration:
+            locked = candidate["locked"]
+            if locked and not candidate.get("is_video"):
+                continue
+            if not duration and not locked:
                 duration = self.get_cached_video_duration(node_id, strict=True)
-            if not duration:
-                self.log("跳过非视频节点", level="warning", node_id=node_id, name=node_names.get(node_id, clean_name))
+            if not duration and not locked:
+                self.log("跳过非视频节点", level="warning", node_id=node_id, name=clean_name)
                 continue
             chapters.append(
                 {
                     "node_id": node_id,
                     "id": node_id,
-                    "name": node_names.get(node_id, clean_name),
+                    "name": clean_name,
                     "duration": duration,
+                    "locked": locked,
                 }
             )
 

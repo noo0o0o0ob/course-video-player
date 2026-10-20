@@ -439,6 +439,37 @@ class PlayerRegressionTests(unittest.TestCase):
         self.assertFalse(self.player.send_heartbeat())
         self.assertIsNone(self.player.token)
 
+    def test_locked_directory_rows_keep_names_order_and_separate_durations(self):
+        # 锁定标题无 href，节点 ID 位于同一行的图标链接中。
+        page = '<a href="/user/node?nodeId=1">继续学习</a>'
+        for node_id, minutes, locked in [(1, 14, False), (2, 2, True), (3, 20, True)]:
+            title_link = 'onclick="alert(1)"' if locked else f'href="/user/node?nodeId={node_id}"'
+            lock_icon = '<img src="/static/user/images/lock.png">' if locked else ''
+            page += (
+                f'<div class="item"><div class="tit"><a {title_link}><span>同名视频</span></a>'
+                f'<span>（{minutes}分钟）</span>{lock_icon}</div><div class="x-btn">'
+                f'<a href="/user/node?nodeId={node_id}" title="视频"><img src="icon.png"></a></div></div>'
+            )
+        self.player.session.get.return_value = response(page, "/user/course/chapter")
+        self.player.get_study_record_durations = Mock(return_value={"1": 845})
+        self.player.get_cached_video_duration = Mock(side_effect=AssertionError("目录时长足够，不应访问节点页"))
+        chapters = self.player.get_chapters("course-1")
+        self.assertEqual([c["node_id"] for c in chapters], ["1", "2", "3"])
+        self.assertEqual([c["name"] for c in chapters], ["同名视频"] * 3)
+        self.assertEqual([c["duration"] for c in chapters], [845, 120, 1200])
+        self.assertEqual([c["locked"] for c in chapters], [False, True, True])
+
+    def test_snapshot_lists_locked_nodes_without_requesting_their_state(self):
+        manager = AccountManager()
+        manager._accounts["synthetic"] = AccountContext("synthetic", "synthetic-user", self.player)
+        self.player.get_chapters = Mock(return_value=[{"node_id": "1"}, {"node_id": "2", "locked": True}])
+        self.player.get_study_state = Mock(return_value=0)
+        self.player.get_user_progress = Mock(return_value={"progress": 0})
+        snapshot = manager.get_course_snapshot("synthetic", "1")
+        self.assertEqual(snapshot["progress"]["total"], 2)
+        self.assertEqual(snapshot["chapters"][1]["study_state"], 0)
+        self.player.get_study_state.assert_called_once_with("1")
+
     def test_duration_failure_cannot_remove_video_from_course_total(self):
         chapter_page = response(
             '<a href="/user/node?nodeId=1">节点一</a>'

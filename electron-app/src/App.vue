@@ -58,6 +58,7 @@
           :chapter-loading="chapterLoading"
           :chapter-error="chapterError"
           :account-ready="session.logged_in"
+          :watching-node-id="isPlaying && selectedAccount?.status?.course_id === selectedCourseId ? String(selectedAccount?.status?.current_node_id || '') : ''"
           @refresh="loadCourses"
           @select-course="selectCourse"
         />
@@ -746,6 +747,19 @@ function applyEvent(event) {
   }
   if (typeof event.current_video_progress === 'number') {
     currentVideoProgress.value = event.current_video_progress
+    const status = selectedAccount.value?.status || {}
+    const courseId = event.course_id || status.course_id
+    const nodeId = event.current_node_id || event.node_id || status.current_node_id
+    if (courseId === selectedCourseId.value && nodeId) {
+      // 后端仅在平台确认完成后发出 100%，切换节点本身不表示完成。
+      const completed = event.current_video_progress === 100
+      const watching = isPlaying.value && !event.is_stopping
+      if (completed || watching) {
+        chapters.value = chapters.value.map(chapter => String(chapter.node_id) === String(nodeId)
+          ? { ...chapter, locked: false, study_state: completed ? 2 : chapter.study_state === 2 ? 2 : 1 }
+          : chapter)
+      }
+    }
   }
   if (typeof event.total_progress === 'number') {
     applyCourseProgress({ progress: event.total_progress })

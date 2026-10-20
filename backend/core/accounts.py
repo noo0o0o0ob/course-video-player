@@ -148,9 +148,13 @@ class AccountManager:
         if self._course_finished(account, course_id):
             for chapter in chapters:
                 chapter["study_state"] = 2
+                chapter["locked"] = False
             return {"chapters": chapters, "progress": {"progress": 100, "completed": len(chapters), "total": len(chapters)}}
         completed = 0
         for chapter in chapters:
+            if chapter.get("locked"):
+                chapter["study_state"] = 0
+                continue
             try:
                 state = account.player.get_study_state(str(chapter["node_id"]))
             except NotLoggedInError:

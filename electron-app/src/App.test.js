@@ -118,6 +118,58 @@ describe('平铺课程工作台', () => {
     expect(rows[1].text()).toContain('未开始')
   })
 
+  test('未解锁章节仍显示名称时长并计入总数', async () => {
+    await flushPromises()
+    api.getAccountChapters.mockResolvedValue({ chapters: [
+      { node_id: 'first', name: '同名视频', duration: 840, study_state: 0 },
+      { node_id: 'locked', name: '同名视频', duration: 120, study_state: 0, locked: true }
+    ] })
+    wrapper.findComponent(CoursePanel).vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    const rows = wrapper.findAll('.chapter-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('14分钟')
+    expect(rows[1].text()).toContain('未解锁')
+    expect(rows[1].text()).toContain('同名视频')
+    expect(rows[1].text()).toContain('2分钟')
+    expect(wrapper.findComponent(CoursePanel).text()).toContain('0 / 2 已完成')
+  })
+
+  test('播放事件将当前章节标为观看中，确认完成后保留完成并移到下一节', async () => {
+    await flushPromises()
+    api.getAccountChapters.mockResolvedValue({ chapters: [
+      { node_id: 'first', name: '第一节', duration: 60, study_state: 0 },
+      { node_id: 'next', name: '第二节', duration: 60, study_state: 0, locked: true }
+    ] })
+    wrapper.findComponent(CoursePanel).vm.$emit('select-course', 'course-a')
+    await flushPromises()
+    const onEvent = api.createEventSocket.mock.calls[0][0]
+    const status = { type: 'status', account_id: 'demo-a', course_id: 'course-a', is_playing: true }
+    onEvent({ ...status, current_node_id: 'first', current_video_progress: 0 })
+    await flushPromises()
+    expect(wrapper.findAll('.chapter-row')[0].text()).toContain('观看中')
+    onEvent({ ...status, current_node_id: 'first', current_video_progress: 99 })
+    await flushPromises()
+    expect(wrapper.findAll('.chapter-row')[0].text()).not.toContain('完成')
+    onEvent({ ...status, current_node_id: 'first', current_video_progress: 100 })
+    onEvent({ ...status, current_node_id: 'next', current_video_progress: 0 })
+    await flushPromises()
+    let rows = wrapper.findAll('.chapter-row')
+    expect(rows[0].text()).toContain('完成')
+    expect(rows[0].text()).not.toContain('观看中')
+    expect(rows[1].text()).toContain('观看中')
+    expect(rows[1].text()).not.toContain('未解锁')
+    expect(wrapper.findComponent(CoursePanel).text()).toContain('1 / 2 已完成')
+    onEvent({ ...status, account_id: 'other-account', current_node_id: 'next', current_video_progress: 100 })
+    await flushPromises()
+    expect(wrapper.findAll('.chapter-row')[1].text()).not.toContain('完成')
+    onEvent({ ...status, current_node_id: 'next', current_video_progress: 20, is_playing: false })
+    await flushPromises()
+    rows = wrapper.findAll('.chapter-row')
+    expect(rows[1].text()).not.toContain('观看中')
+    expect(rows[1].text()).not.toContain('完成')
+  })
+
   test('切换账号后丢弃旧账号迟到的课程列表', async () => {
     accountState.push({ account_id: 'demo-b', logged_in: true })
     await flushPromises()
